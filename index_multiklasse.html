@@ -1,0 +1,2655 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Hausaufgabensystem – Belohnungssystem</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, set, get, onValue, update, remove, push }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, updatePassword, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+
+const firebaseConfig = {
+     apiKey: "AIzaSyDzU2tOfh_eMHCblhk3LH1eQmWiE5ZzzC4",
+    authDomain: "hahelderweiterung.firebaseapp.com",
+    databaseURL: "https://hahelderweiterung-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "hahelderweiterung",
+    storageBucket: "hahelderweiterung.firebasestorage.app",
+    messagingSenderId: "69513024651",
+    appId: "1:69513024651:web:fbbfe58da91fe9bf91b08e"
+};
+
+
+const app  = initializeApp(firebaseConfig);
+const db   = getDatabase(app);
+const auth = getAuth(app);
+
+// Zweiter App-Kontext NUR zum Anlegen neuer Accounts (Lehrer/Schüler).
+// So bleibt der angemeldete Admin/Lehrer eingeloggt, während ein neuer Account entsteht.
+const secondaryApp  = initializeApp(firebaseConfig, 'account-creator');
+const secondaryAuth = getAuth(secondaryApp);
+async function createAccount(email, password) {
+  const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+  const uid = cred.user.uid;
+  await signOut(secondaryAuth);
+  return uid;
+}
+
+window._fb = { db, ref, set, get, onValue, update, remove, push,
+  auth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+  signOut, updatePassword, onAuthStateChanged, createAccount };
+window._fbReady = true;
+window.dispatchEvent(new Event('firebase-ready'));
+</script>
+
+<style>
+:root {
+  --navy: #1B2D4F; --navy-light: #2A4070; --gold: #F5B700; --gold-light: #FFD84D;
+  --green: #2ECC71; --green-dark: #27AE60; --red: #E74C3C; --blue-soft: #4A90D9;
+  --bg: #F0F4F8; --card: #FFFFFF; --text: #1B2D4F; --text-muted: #6B7A99;
+  --border: #DDE3EE; --radius: 16px;
+  --shadow: 0 4px 24px rgba(27,45,79,0.10); --shadow-hover: 0 8px 32px rgba(27,45,79,0.18);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+
+/* LOADING OVERLAY */
+#loading-overlay {
+  position:fixed; inset:0; background:var(--navy);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  z-index:99999; color:white; gap:16px;
+}
+.loading-spinner {
+  width:48px; height:48px; border:4px solid rgba(255,255,255,0.2);
+  border-top-color:var(--gold); border-radius:50%;
+  animation:spin 0.8s linear infinite;
+}
+@keyframes spin { to{transform:rotate(360deg)} }
+.loading-text { font-family:'Fredoka One',cursive; font-size:18px; color:var(--gold); }
+.loading-sub  { font-size:13px; opacity:0.6; }
+
+/* CONFIG WARNING */
+#config-warning {
+  display:none; position:fixed; inset:0; background:var(--navy);
+  align-items:center; justify-content:center; z-index:99999;
+}
+.config-box {
+  background:white; border-radius:20px; padding:36px; max-width:500px; width:90%;
+  text-align:center;
+}
+.config-box h2 { font-family:'Fredoka One',cursive; font-size:22px; color:var(--red); margin-bottom:12px; }
+.config-box p  { font-size:14px; color:var(--text-muted); line-height:1.6; }
+.config-box code { background:var(--bg); padding:2px 7px; border-radius:6px; font-size:13px; color:var(--navy); }
+
+/* LOGIN */
+#login-screen {
+  position:fixed; inset:0;
+  background:linear-gradient(135deg,var(--navy) 0%,var(--navy-light) 100%);
+  display:none; align-items:center; justify-content:center; z-index:9999;
+}
+#login-screen.visible { display:flex; }
+.login-box { background:white; border-radius:24px; padding:40px; width:100%; max-width:420px; box-shadow:0 20px 60px rgba(0,0,0,0.3); }
+.login-logo { text-align:center; margin-bottom:28px; }
+.login-logo .logo-icon { font-size:48px; }
+.login-logo .logo-text { font-family:'Fredoka One',cursive; font-size:28px; color:var(--navy); margin-top:8px; }
+.login-logo .logo-sub  { color:var(--text-muted); font-size:13px; }
+.login-error { color:var(--red); font-size:13px; text-align:center; margin-bottom:10px; display:none; }
+
+/* HEADER */
+header {
+  background:linear-gradient(135deg,var(--navy) 0%,var(--navy-light) 100%);
+  padding:0 32px; display:flex; align-items:center; justify-content:space-between;
+  height:68px; position:sticky; top:0; z-index:100;
+  box-shadow:0 2px 16px rgba(27,45,79,0.25);
+}
+.logo { display:flex; align-items:center; gap:10px; }
+.logo-text { font-family:'Fredoka One',cursive; font-size:22px; color:var(--gold); }
+.logo-sub  { font-size:12px; color:rgba(255,255,255,0.55); margin-top:-2px; }
+.header-user { display:flex; align-items:center; gap:12px; color:rgba(255,255,255,0.85); font-size:14px; }
+.user-badge { background:rgba(255,255,255,0.12); padding:4px 12px; border-radius:20px; font-weight:600; }
+
+/* SYNC INDICATOR */
+.sync-dot {
+  width:8px; height:8px; border-radius:50%; background:var(--green);
+  animation:pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.sync-dot.syncing { background:var(--gold); animation:spin 0.8s linear infinite; border-radius:0; width:10px; height:10px; border:2px solid var(--gold); background:transparent; border-top-color:transparent; }
+
+/* MAIN */
+main { max-width:1200px; margin:0 auto; padding:32px 24px; }
+.view { display:none; }
+.view.active { display:block; }
+
+.card { background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow); padding:24px; border:1px solid var(--border); }
+.card-title { font-family:'Fredoka One',cursive; font-size:17px; color:var(--sp-text, var(--navy)); margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+.grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+@media(max-width:900px) { .grid-2,.grid-3,.grid-4 { grid-template-columns:1fr 1fr; } }
+@media(max-width:600px) { .grid-2,.grid-3,.grid-4 { grid-template-columns:1fr; } }
+
+/* ============================================================
+   MOBILE ANSICHT — nur für Smartphones (nicht Tablets)
+   Tablets (min-width:601px) behalten Desktop-Ansicht
+============================================================ */
+@media(max-width:600px) and (pointer:coarse) {
+
+  /* Header vereinfachen */
+  header { padding:0 16px; height:56px; }
+  .logo-text { font-size:18px; }
+  .logo-sub  { display:none; }
+  #header-date { display:none; }
+  .user-badge { font-size:12px; padding:3px 8px; }
+  header .btn-sm { font-size:11px; padding:5px 10px; }
+
+  /* Main Padding reduzieren */
+  main { padding:16px 12px 80px 12px; }
+
+  /* Stat-Boxen: 2 pro Reihe auf Mobile */
+  .grid-4 { grid-template-columns:1fr 1fr !important; gap:10px !important; }
+  .stat-box { padding:14px 12px; gap:10px; }
+  .stat-icon { font-size:24px; }
+  .stat-val  { font-size:24px; }
+  .stat-label { font-size:10px; }
+
+  /* Cards */
+  .card { padding:16px; border-radius:12px; }
+  .card-title { font-size:15px; }
+
+  /* HW Check */
+  .hw-date-header { flex-direction:column; align-items:flex-start; }
+  .hw-search { width:100%; }
+  .hw-check-grid { grid-template-columns:1fr; }
+
+  /* Reward Grid */
+  .reward-grid { grid-template-columns:1fr 1fr; gap:10px; }
+  .reward-icon { font-size:28px; }
+  .reward-name { font-size:13px; }
+
+  /* Charts: kleiner auf Mobile */
+  #chart-points, #chart-week { max-height:180px; }
+
+  /* Milestone */
+  .milestone-circle { width:48px; height:48px; font-size:20px; }
+  .milestone-connector { left:24px; }
+
+  /* Leaderboard */
+  .lb-pts { font-size:16px; }
+
+  /* Profile Hero */
+  .profile-hero { padding:20px 16px; }
+  #sp-points { font-size:36px !important; }
+
+  /* Modals */
+  .modal { padding:20px 16px; border-radius:16px 16px 0 0; position:fixed; bottom:0; left:0; right:0; max-width:100%; margin:0; transform:translateY(20px); }
+  .modal-overlay.open .modal { transform:translateY(0); }
+
+  /* Toast */
+  #toast { bottom:80px; right:12px; left:12px; max-width:100%; font-size:13px; }
+
+  /* Admin-Section Title */
+  .admin-section-title { font-size:16px; }
+
+  /* Bottom Navigation */
+  #mobile-nav {
+    display:flex !important;
+    position:fixed; bottom:0; left:0; right:0; z-index:200;
+    background:var(--navy);
+    box-shadow:0 -2px 16px rgba(27,45,79,0.25);
+    height:64px;
+  }
+  .mobile-nav-btn {
+    flex:1; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:2px; color:rgba(255,255,255,0.55);
+    font-size:10px; font-weight:600; border:none; background:none;
+    cursor:pointer; padding:8px 4px; transition:color 0.2s;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .mobile-nav-btn.active { color:var(--gold); }
+  .mobile-nav-btn .nav-icon { font-size:22px; line-height:1; }
+
+  /* Abmelden-Button im Header auf Mobile zu einem kompakten Icon verkleinern
+     statt ihn komplett zu verstecken (er war vorher unerreichbar) */
+  .header-logout {
+    display:flex !important;
+    padding:0 !important; width:34px; height:34px;
+    align-items:center; justify-content:center;
+    font-size:0 !important; border-radius:50% !important;
+    flex-shrink:0;
+  }
+  .header-logout::before { content:'🚪'; font-size:16px; }
+
+  /* Sections die per Mobile-Nav gesteuert werden */
+  .mobile-section { display:none; }
+  .mobile-section.active { display:block; }
+}
+
+/* Tablets und größer: normale Desktop-Ansicht, Bottom-Nav verstecken */
+@media(min-width:601px) {
+  #mobile-nav { display:none !important; }
+  .mobile-section { display:block !important; }
+  .header-logout { display:flex !important; }
+}
+
+.stat-box {
+  background:var(--card); border-radius:var(--radius); box-shadow:var(--shadow);
+  padding:20px 24px; border-left:5px solid var(--gold); display:flex; align-items:center; gap:16px;
+}
+.stat-icon { font-size:32px; }
+.stat-val { font-family:'Fredoka One',cursive; font-size:32px; color:var(--sp-text, var(--navy)); }
+.stat-label { font-size:12px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; }
+
+.hw-date-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
+.hw-search { padding:8px 14px; border-radius:10px; border:2px solid var(--border); font-size:14px; background:var(--bg); color:var(--text); width:220px; transition:border-color 0.2s; }
+.hw-search:focus { outline:none; border-color:var(--gold); background:white; }
+.hw-check-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:10px; }
+.hw-check-item { display:flex; align-items:center; justify-content:space-between; background:var(--bg); border-radius:10px; padding:12px 14px; border:2px solid var(--border); transition:border-color 0.2s; }
+.hw-check-item.done    { border-color:var(--green); background:#F0FFF6; }
+.hw-check-item.missing { border-color:var(--red);   background:#FFF5F5; }
+.hw-check-item.unchecked { border-color:var(--border); background:var(--bg); }
+.hw-student-name { font-weight:600; font-size:14px; }
+.hw-actions { display:flex; gap:6px; }
+.btn-hw { width:34px; height:34px; border-radius:8px; border:none; cursor:pointer; font-size:16px; transition:transform 0.1s,opacity 0.2s; display:flex; align-items:center; justify-content:center; }
+.btn-hw:hover { transform:scale(1.15); }
+.btn-done { background:var(--green); color:white; }
+.btn-miss { background:var(--red); color:white; }
+.btn-hw.inactive { opacity:0.35; }
+
+.rank-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:12px; font-weight:700; color:white; }
+.rank-holz   { background:#8B6914; }
+.rank-stein  { background:#6B7A99; }
+.rank-kupfer { background:#B87333; }
+.rank-bronze { background:#CD7F32; }
+.rank-silber { background:#A8A9AD; }
+.rank-gold   { background:linear-gradient(90deg,#F5B700,#FFD84D); color:var(--navy); }
+.rank-platin { background:linear-gradient(90deg,#E5E4E2,#BFC1C2); color:var(--navy); }
+.rank-custom { color:white; }
+
+.streak-badge { display:inline-flex; align-items:center; gap:4px; background:linear-gradient(90deg,#FF6B35,#F5B700); color:white; font-size:11px; font-weight:700; padding:3px 8px; border-radius:20px; margin-top:6px; }
+.progress-bar { height:6px; background:var(--border); border-radius:3px; margin-top:10px; overflow:hidden; }
+.progress-fill { height:100%; border-radius:3px; background:linear-gradient(90deg,var(--green),var(--gold)); transition:width 0.4s; }
+
+.btn { font-family:'Inter',sans-serif; font-weight:600; font-size:14px; padding:10px 20px; border-radius:10px; border:none; cursor:pointer; transition:transform 0.1s,box-shadow 0.2s; }
+.btn:hover    { transform:translateY(-1px); box-shadow:0 4px 14px rgba(0,0,0,0.15); }
+.btn:disabled { opacity:0.45; cursor:not-allowed; transform:none; }
+.btn-primary   { background:var(--gold); color:var(--navy); }
+.btn-secondary { background:var(--navy); color:white; }
+.btn-danger    { background:var(--red); color:white; }
+.btn-ghost     { background:var(--border); color:var(--text); }
+.btn-green     { background:var(--green); color:white; }
+.btn-sm { padding:7px 14px; font-size:13px; }
+
+.reward-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; }
+.reward-card { background:var(--card); border-radius:var(--radius); padding:20px; border:2px solid var(--border); text-align:center; transition:box-shadow 0.2s,border-color 0.2s,transform 0.15s; position:relative; overflow:hidden; }
+.reward-card:hover { box-shadow:var(--shadow-hover); border-color:var(--gold); transform:translateY(-3px); }
+.reward-icon { font-size:40px; margin-bottom:10px; }
+.reward-name { font-weight:700; font-size:15px; margin-bottom:4px; }
+.reward-desc { font-size:12px; color:var(--text-muted); margin-bottom:12px; }
+.reward-cost { display:inline-flex; align-items:center; gap:4px; background:var(--gold); color:var(--navy); font-family:'Fredoka One',cursive; font-size:16px; padding:4px 12px; border-radius:20px; }
+
+.milestone-path { position:relative; padding:20px 0; }
+.milestone-connector { position:absolute; left:32px; top:44px; bottom:44px; width:4px; border-radius:2px; background:linear-gradient(to bottom,var(--green),var(--border)); }
+.milestone-item  { display:flex; align-items:center; gap:16px; position:relative; margin-bottom:16px; }
+.milestone-circle { width:64px; height:64px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:28px; border:4px solid var(--border); background:var(--card); flex-shrink:0; z-index:1; transition:border-color 0.3s,box-shadow 0.3s; }
+.milestone-circle.reached  { border-color:var(--green); box-shadow:0 0 0 4px rgba(46,204,113,0.2); }
+.milestone-circle.redeemed { border-color:var(--gold); background:#FFFBEE; box-shadow:0 0 0 4px rgba(245,183,0,0.2); }
+.milestone-circle.next     { border-color:var(--blue-soft); box-shadow:0 0 0 4px rgba(74,144,217,0.2); }
+.milestone-info { flex:1; }
+.milestone-name { font-weight:700; font-size:15px; }
+.milestone-desc { font-size:12px; color:var(--text-muted); margin-bottom:4px; }
+.milestone-cost { font-family:'Fredoka One',cursive; font-size:14px; color:var(--blue-soft); }
+.milestone-status { font-size:12px; font-weight:600; margin-top:4px; }
+
+.lb-row { display:flex; align-items:center; gap:14px; padding:12px 16px; border-radius:12px; margin-bottom:8px; background:var(--bg); border:1px solid var(--border); transition:background 0.2s; }
+.lb-row:hover { background:#E8EEF8; }
+.lb-rank { font-family:'Fredoka One',cursive; font-size:20px; width:32px; text-align:center; color:var(--text-muted); }
+.lb-rank.gold { color:#F5B700; } .lb-rank.silver { color:#A0AEC0; } .lb-rank.bronze { color:#CD7F32; }
+.lb-name { flex:1; font-weight:600; }
+.lb-streak { font-size:12px; color:#FF6B35; font-weight:700; }
+.lb-pts { font-family:'Fredoka One',cursive; font-size:20px; color:var(--gold); }
+
+.class-meter { background:var(--card); border-radius:var(--radius); padding:24px; margin-bottom:20px; border:2px solid var(--border); box-shadow:var(--shadow); }
+.class-meter-bar { height:20px; background:var(--bg); border-radius:10px; overflow:hidden; margin:12px 0; border:1px solid var(--border); }
+.class-meter-fill { height:100%; border-radius:10px; background:linear-gradient(90deg,var(--green),#00D2FF); transition:width 0.6s cubic-bezier(0.4,0,0.2,1); position:relative; }
+.class-meter-fill::after { content:''; position:absolute; top:0; left:0; right:0; bottom:0; background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.3) 50%,transparent 100%); animation:shimmer 2s infinite; }
+@keyframes shimmer { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+.threshold-marker { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-muted); margin-top:4px; }
+
+.form-group  { margin-bottom:16px; }
+.form-label  { font-weight:600; font-size:13px; margin-bottom:6px; display:block; color:var(--navy); }
+.form-input  { width:100%; padding:10px 14px; border-radius:10px; border:2px solid var(--border); font-family:'Inter',sans-serif; font-size:14px; background:var(--bg); color:var(--text); transition:border-color 0.2s; }
+.form-input:focus { outline:none; border-color:var(--gold); background:white; }
+
+#toast { position:fixed; bottom:24px; right:24px; z-index:9999; background:var(--navy); color:white; padding:14px 22px; border-radius:14px; font-weight:600; font-size:14px; box-shadow:0 8px 32px rgba(0,0,0,0.25); transform:translateY(80px); opacity:0; transition:transform 0.3s,opacity 0.3s; max-width:340px; display:flex; align-items:center; gap:10px; }
+/* Mobile viewport meta fix */
+@media(max-width:600px) {
+  header .sync-dot { display:none; }
+  .hw-actions .btn-hw { width:38px; height:38px; font-size:18px; }
+  .milestone-item { gap:10px; }
+  .milestone-info .milestone-name { font-size:13px; }
+  .milestone-info .milestone-desc { font-size:11px; }
+  .log-entry { flex-wrap:wrap; }
+  .lb-row { padding:10px 12px; gap:10px; }
+  .stat-box { border-radius:12px; }
+  .section-title { font-size:20px; }
+  .reward-card { padding:14px 10px; }
+  .compare-label { width:70px; font-size:11px; }
+  .form-input, .hw-search { font-size:16px; } /* Verhindert iOS Zoom */
+  .btn { min-height:44px; } /* Touch-Target Mindestgröße */
+  .btn-sm { min-height:36px; }
+}
+#toast.show { transform:translateY(0); opacity:1; }
+#toast.success { border-left:4px solid var(--green); }
+#toast.error   { border-left:4px solid var(--red); }
+#toast.info    { border-left:4px solid var(--gold); }
+
+.modal-overlay { position:fixed; inset:0; background:rgba(27,45,79,0.55); z-index:500; display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity 0.2s; }
+.modal-overlay.open { opacity:1; pointer-events:all; }
+.modal { background:white; border-radius:20px; padding:32px; max-width:480px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,0.3); transform:scale(0.95); transition:transform 0.2s; max-height:90vh; overflow-y:auto; }
+.modal-overlay.open .modal { transform:scale(1); }
+.modal-title { font-family:'Fredoka One',cursive; font-size:22px; margin-bottom:20px; }
+
+.divider { height:1px; background:var(--border); margin:20px 0; }
+@keyframes pop { 0%{transform:scale(1)} 50%{transform:scale(1.4)} 100%{transform:scale(1)} }
+.pop { animation:pop 0.3s ease; }
+
+.log-entry { display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:10px; margin-bottom:6px; font-size:13px; background:var(--bg); border:1px solid var(--border); }
+.log-icon { font-size:18px; }
+.log-text  { flex:1; }
+.log-pts   { font-weight:700; }
+.log-pts.positive { color:var(--green); }
+.log-pts.negative { color:var(--red); }
+.log-date  { font-size:11px; color:var(--text-muted); }
+
+.motiv-box { background:linear-gradient(135deg,var(--navy) 0%,var(--navy-light) 100%); border-radius:var(--radius); padding:24px; margin-bottom:20px; color:white; position:relative; overflow:hidden; }
+.motiv-box::before { content:''; position:absolute; top:-40px; right:-40px; width:160px; height:160px; background:rgba(245,183,0,0.08); border-radius:50%; }
+.motiv-loading { opacity:0.55; font-size:14px; }
+
+.profile-hero { background:linear-gradient(135deg,var(--navy) 0%,var(--navy-light) 100%); border-radius:var(--radius); padding:28px; color:white; margin-bottom:20px; }
+
+/* ============================================================
+   SCHÜLERANSICHT — individuell anpassbarer Hintergrund + Dark Mode
+   #app umschließt Header UND alle Views, daher wird hier skaliert:
+   Hintergrundfarbe -> #app + header (ganze Seite inkl. oberer Rand)
+   Overlay-Farbe    -> alle Kästen (.card, .profile-hero, .motiv-box)
+============================================================ */
+#app {
+  min-height:100vh;
+  background:var(--bg);
+  color:var(--text);
+  transition:background-color 0.3s ease, color 0.3s ease;
+}
+header, .card, .profile-hero, .motiv-box {
+  transition:background-color 0.3s ease, color 0.3s ease;
+}
+#app.student-dark-mode {
+  --bg: #12161f;
+  --card: #1c2230;
+  --text: #EAEDF5;
+  --text-muted: #9AA5B8;
+  --border: #2b3245;
+  --navy: #1a2233;
+  --navy-light: #26314a;
+  --sp-text: #EAEDF5;
+}
+.color-picker-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.color-picker-row input[type=color] { width:36px; height:36px; padding:0; border:2px solid var(--border); border-radius:8px; cursor:pointer; background:none; }
+.color-picker-row input[type=text] { width:92px; padding:8px 10px; border-radius:8px; border:2px solid var(--border); font-size:13px; background:var(--bg); color:var(--text); }
+.color-picker-row input[type=number] { width:54px; padding:8px 6px; border-radius:8px; border:2px solid var(--border); font-size:13px; text-align:center; background:var(--bg); color:var(--text); }
+.color-picker-row .rgb-label { font-size:11px; color:var(--text-muted); margin-left:2px; }
+
+.theme-toggle-switch { position:relative; display:inline-block; width:46px; height:26px; }
+.theme-toggle-switch input { opacity:0; width:0; height:0; }
+.theme-toggle-slider { position:absolute; cursor:pointer; inset:0; background:var(--border); border-radius:26px; transition:0.2s; }
+.theme-toggle-slider::before { content:''; position:absolute; height:20px; width:20px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.3); }
+.theme-toggle-switch input:checked + .theme-toggle-slider { background:var(--navy); }
+.theme-toggle-switch input:checked + .theme-toggle-slider::before { transform:translateX(20px); }
+
+.timer-box { background:linear-gradient(90deg,#1B2D4F,#2A4070); color:white; border-radius:12px; padding:14px 20px; display:flex; align-items:center; gap:12px; font-size:14px; margin-top:12px; }
+.timer-countdown { font-family:'Fredoka One',cursive; font-size:20px; color:var(--gold-light); }
+
+.topflop-row { display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:10px; margin-bottom:6px; }
+.topflop-row.top  { background:#F0FFF6; border:1px solid var(--green); }
+.topflop-row.flop { background:#FFF5F5; border:1px solid var(--red); }
+
+.redeem-log-item { display:flex; gap:10px; align-items:center; padding:8px 12px; border-radius:8px; background:var(--bg); border:1px solid var(--border); margin-bottom:6px; font-size:13px; }
+
+.compare-bar   { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.compare-label { width:90px; font-size:12px; font-weight:600; color:var(--text-muted); }
+.compare-track { flex:1; height:10px; background:var(--border); border-radius:5px; overflow:hidden; }
+.compare-fill  { height:100%; border-radius:5px; transition:width 0.6s; }
+.compare-fill.mine { background:linear-gradient(90deg,var(--gold),#FFD84D); }
+.compare-fill.avg  { background:var(--blue-soft); }
+
+.admin-section-title { display:flex; align-items:center; gap:12px; font-family:'Fredoka One',cursive; font-size:20px; color:var(--navy); padding:24px 0 12px 0; border-top:2px solid var(--border); margin-top:28px; }
+
+.gap-12 { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+.mt-20  { margin-top:20px; }
+.mb-20  { margin-bottom:20px; }
+.mb-12  { margin-bottom:12px; }
+.text-muted { color:var(--text-muted); font-size:13px; }
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div id="loading-overlay">
+  <div style="font-size:48px;">⭐</div>
+  <div class="loading-text">HausaufgabenHeld</div>
+  <div class="loading-spinner"></div>
+  <div class="loading-sub">Verbindung zu Firebase…</div>
+</div>
+
+<!-- CONFIG WARNING -->
+<div id="config-warning">
+  <div class="config-box">
+    <h2>⚠️ Firebase nicht konfiguriert</h2>
+   Ey du hohlbirne, Firebase muss noch konfiguriert werden
+  </div>
+</div>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="logo-icon">⭐</div>
+      <div class="logo-text">HausaufgabenHeld</div>
+      <div class="logo-sub">Belohnungssystem für Klassen</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">E-Mail-Adresse</label>
+      <input type="email" class="form-input" id="login-user" placeholder="Deine E-Mail-Adresse" autocomplete="email">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Passwort</label>
+      <input type="password" class="form-input" id="login-pass" placeholder="Passwort" autocomplete="current-password">
+    </div>
+    <div class="login-error" id="login-error">❌ Ungültige Anmeldedaten.</div>
+    <button class="btn btn-primary" style="width:100%;margin-top:4px;" onclick="doLogin()">Anmelden</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" style="display:none;">
+<header>
+  <div class="logo">
+    <div style="font-size:28px;">⭐</div>
+    <div>
+      <div class="logo-text">HausaufgabenHeld</div>
+      <div class="logo-sub">Belohnungssystem</div>
+    </div>
+  </div>
+  <div class="header-user">
+    <div class="sync-dot" id="sync-dot" title="Echtzeit-Verbindung aktiv"></div>
+    <div id="header-date" style="color:rgba(255,255,255,0.6);font-size:13px;"></div>
+    <div class="user-badge" id="header-user-badge">—</div>
+    <button class="btn btn-sm header-logout" style="background:rgba(255,255,255,0.12);color:white;border:none;" onclick="doLogout()">Abmelden</button>
+  </div>
+</header>
+
+<!-- MOBILE BOTTOM NAVIGATION (nur auf Smartphones sichtbar) -->
+<div id="mobile-nav" style="display:none;">
+  <button class="mobile-nav-btn active" id="nav-btn-home" onclick="mobileNav('home')">
+    <span class="nav-icon">🏠</span>Übersicht
+  </button>
+  <button class="mobile-nav-btn" id="nav-btn-hw" onclick="mobileNav('hw')">
+    <span class="nav-icon">📋</span>Hausauf.
+  </button>
+  <button class="mobile-nav-btn" id="nav-btn-rank" onclick="mobileNav('rank')">
+    <span class="nav-icon">🏅</span>Rangliste
+  </button>
+  <button class="mobile-nav-btn" id="nav-btn-rewards" onclick="mobileNav('rewards')">
+    <span class="nav-icon">🎁</span>Bel.
+  </button>
+  <button class="mobile-nav-btn" id="nav-btn-settings" onclick="mobileNav('settings')">
+    <span class="nav-icon">⚙️</span>Mehr
+  </button>
+</div>
+
+<main>
+
+<!-- LEHRER-ANSICHT -->
+<div id="view-teacher" class="view">
+  <!-- KLASSENAUSWAHL (Lehrkräfte mit mehreren Klassen / Admin) -->
+  <div id="class-switcher-bar" class="card mb-20" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 18px;">
+    <span style="font-family:'Fredoka One',cursive;font-size:16px;">🏫 Klasse</span>
+    <select class="form-input" id="class-switch-select" style="width:auto;min-width:140px;" onchange="switchClass(this.value)"></select>
+    <span id="class-empty-hint" class="text-muted" style="display:none;font-size:13px;"></span>
+  </div>
+
+  <!-- HOME SECTION: Stats + Klassenmeter -->
+  <div class="mobile-section active" id="mobile-home">
+  <div class="grid-4 mb-20" style="grid-template-columns:repeat(3,1fr);gap:16px;">
+    <div class="stat-box"><div class="stat-icon">👥</div><div><div class="stat-val" id="stat-students">0</div><div class="stat-label">Schüler gesamt</div></div></div>
+    <div class="stat-box" style="border-left-color:var(--green)"><div class="stat-icon">✅</div><div><div class="stat-val" id="stat-today-done">0</div><div class="stat-label">Heute erledigt</div></div></div>
+    <div class="stat-box" style="border-left-color:#FF6B35"><div class="stat-icon">🔥</div><div><div class="stat-val" id="stat-class-streak">0</div><div class="stat-label">Klassen-Streak</div></div></div>
+    <div class="stat-box" style="border-left-color:var(--blue-soft)"><div class="stat-icon">🏫</div><div><div class="stat-val" id="stat-class-pts">0</div><div class="stat-label">Klassenpunkte</div></div></div>
+    <div class="stat-box" style="border-left-color:var(--green)"><div class="stat-icon">📚</div><div><div class="stat-val" id="stat-total-done">0</div><div class="stat-label">HA gesamt abgegeben</div></div></div>
+    <div class="stat-box" style="border-left-color:var(--red)"><div class="stat-icon">❌</div><div><div class="stat-val" id="stat-total-missing">0</div><div class="stat-label">HA gesamt gefehlt</div></div></div>
+  </div>
+
+  <div class="class-meter mb-20">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+      <div>
+        <div class="card-title" style="margin-bottom:2px;">🎓 Klassenerfolg heute</div>
+        <div class="text-muted">Ab <span id="class-threshold-display-1">90</span>% gibt es Klassenpunkte – Auszahlung nach 1 Stunde!</div>
+      </div>
+      <div id="class-pct-label" style="font-family:'Fredoka One',cursive;font-size:28px;color:var(--navy)">—</div>
+    </div>
+    <div class="class-meter-bar"><div class="class-meter-fill" id="class-meter-fill" style="width:0%"></div></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <div class="threshold-marker">🎯 <span id="class-threshold-display-2">90</span>%-Schwelle für +<span id="class-bonus-display">5</span> Klassenpunkte</div>
+      <div id="class-bonus-status"></div>
+    </div>
+    <div id="timer-box-container"></div>
+  </div>
+
+  </div><!-- /mobile-home -->
+
+  <!-- HW SECTION -->
+  <div class="mobile-section" id="mobile-hw">
+  <div class="card mb-20">
+    <div class="hw-date-header">
+      <div class="card-title">📋 Hausaufgaben eintragen</div>
+      <div class="gap-12">
+        <input type="text" class="hw-search" id="hw-search" placeholder="🔍 Schüler suchen…" oninput="renderHWCheck()">
+        <input type="date" class="form-input" id="hw-date" style="width:auto">
+        <button class="btn btn-ghost btn-sm" onclick="setToday()" title="Auf heute zurücksetzen">📅 Heute</button>
+      </div>
+    </div>
+    <div class="hw-check-grid" id="hw-check-grid"></div>
+  </div>
+
+  </div><!-- /mobile-hw -->
+
+  <!-- RANK SECTION: Charts + Top/Flop + Rangliste -->
+  <div class="mobile-section" id="mobile-rank">
+  <div class="grid-2 mb-20">
+    <div class="card"><div class="card-title">📊 Punkteverteilung</div><canvas id="chart-points" height="220"></canvas></div>
+    <div class="card"><div class="card-title">📈 Wochenverlauf</div><canvas id="chart-week" height="220"></canvas></div>
+  </div>
+
+  <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+    <label style="font-size:12px;color:var(--text-muted);font-weight:600;">Sortieren nach:</label>
+    <select class="form-input" id="topflop-sort" style="width:auto;font-size:13px;padding:6px 10px;" onchange="renderTopFlop()">
+      <option value="points">Punkten</option>
+      <option value="streak">Streak</option>
+      <option value="rank">Rang</option>
+    </select>
+  </div>
+  <div class="grid-2 mb-20">
+    <div class="card"><div class="card-title">🏆 Top-Schüler</div><div id="top-students"></div></div>
+    <div class="card"><div class="card-title">📉 Flop-Schüler</div><div id="flop-students"></div></div>
+  </div>
+
+  <div class="card mb-20"><div class="card-title">🏅 Rangliste</div><div id="leaderboard"></div></div>
+
+  </div><!-- /mobile-rank -->
+
+  <!-- REWARDS SECTION: Eingelöste Belohnungen + Meilensteine -->
+  <div class="mobile-section" id="mobile-rewards">
+  <div class="card mb-20"><div class="card-title">🎁 Eingelöste Belohnungen</div><div id="redeem-log-list"><div class="text-muted">Noch keine Belohnungen eingelöst.</div></div></div>
+
+  <div class="card mb-20">
+    <div class="card-title">🏫 Klassen-Belohnungspfad</div>
+    <div class="gap-12 mb-20"><div><div class="stat-val" id="class-points-display2">0</div><div class="text-muted" style="font-size:12px;">Klassenpunkte (kumuliert)</div></div></div>
+    <div class="milestone-path" id="milestone-path"><div class="milestone-connector"></div></div>
+  </div>
+<div class="card mb-20">
+  <div class="card-title">🔐 Passwort ändern</div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+    <div class="form-group" style="margin-bottom:0;flex:1;min-width:180px;">
+      <label class="form-label">Neues Passwort</label>
+      <input type="password" class="form-input" id="new-teacher-pw" placeholder="Neues Passwort eingeben">
+    </div>
+    <div class="form-group" style="margin-bottom:0;flex:1;min-width:180px;">
+      <label class="form-label">Wiederholen</label>
+      <input type="password" class="form-input" id="new-teacher-pw2" placeholder="Passwort wiederholen">
+    </div>
+    <button class="btn btn-secondary" onclick="changeTeacherPassword()">🔐 Ändern</button>
+  </div>
+  <div class="text-muted" style="margin-top:8px;font-size:12px;" id="pw-change-hint"></div>
+</div>
+  </div><!-- /mobile-rewards -->
+
+  <!-- SETTINGS SECTION: Verwalten + Einstellungen -->
+  <div class="mobile-section" id="mobile-settings">
+  <div class="admin-section-title">⚙️ Verwalten</div>
+
+  <!-- ADMIN: KLASSEN & LEHRKRÄFTE -->
+  <div class="card mb-20 admin-only" id="admin-panel" style="display:none;">
+    <div class="card-title">🛡️ Klassen &amp; Lehrkräfte</div>
+    <div class="grid-2" style="gap:20px;align-items:start;">
+      <div>
+        <div class="form-label">🏫 Klassen</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <input type="text" class="form-input" id="new-class-name" placeholder="z.B. 7a" maxlength="30">
+          <button class="btn btn-primary btn-sm" onclick="createClass()">+ Klasse</button>
+        </div>
+        <div id="admin-class-list"></div>
+      </div>
+      <div>
+        <div class="form-label">👩‍🏫 Lehrkräfte</div>
+        <button class="btn btn-secondary btn-sm mb-12" onclick="openTeacherModal()">+ Lehrkraft anlegen</button>
+        <div id="admin-teacher-list"></div>
+      </div>
+    </div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:18px 0;">
+    <div class="form-label">📦 Daten aus der Einzelklassen-Version übernehmen</div>
+    <div class="text-muted" style="margin-bottom:8px;font-size:12px;">Kopiert Schüler, Belohnungen, Hausaufgaben-Status und Einstellungen der bisherigen Version in eine neue Klasse. Die alten Daten bleiben unverändert erhalten.</div>
+    <button class="btn btn-secondary btn-sm" onclick="migrateLegacyData()">📦 Alte Daten in neue Klasse übernehmen</button>
+  </div>
+
+  <!-- SYSTEMEINSTELLUNGEN -->
+  <div class="card mb-20">
+    <div class="card-title">🎛️ Systemeinstellungen</div>
+    <div class="grid-2" style="gap:16px;">
+
+      <div>
+        <div class="form-label">🏫 Klassenpunkte pro Bonus</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="number" class="form-input" id="setting-class-bonus" min="0" style="width:100px;" placeholder="5">
+          <button class="btn btn-primary btn-sm" onclick="saveSetting('classBonus','setting-class-bonus',true)">Speichern</button>
+        </div>
+        <div class="text-muted" style="margin-top:4px;">Klassenpunkte die die Klasse beim Bonus erhält</div>
+      </div>
+
+      <div>
+        <div class="form-label">🎁 Schülerpunkte pro Klassenbonus</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="number" class="form-input" id="setting-student-bonus" min="0" style="width:100px;" placeholder="0">
+          <button class="btn btn-primary btn-sm" onclick="saveSetting('classStudentBonus','setting-student-bonus',true)">Speichern</button>
+        </div>
+        <div class="text-muted" style="margin-top:4px;">Punkte die jeder Schüler beim Klassenbonus bekommt (Standard: 0)</div>
+      </div>
+
+      <div>
+        <div class="form-label">🎯 Bonus-Schwelle (%)</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="number" class="form-input" id="setting-bonus-threshold" min="1" max="100" style="width:100px;" placeholder="90">
+          <button class="btn btn-primary btn-sm" onclick="saveSetting('classBonusThreshold','setting-bonus-threshold',true)">Speichern</button>
+        </div>
+        <div class="text-muted" style="margin-top:4px;">Ab wie viel % erledigter Hausaufgaben der Klassenbonus verfügbar wird (Standard: 90%)</div>
+      </div>
+
+    </div>
+  </div>
+  <div class="card mb-20">
+    <div class="card-title">🏅 Ränge bearbeiten</div>
+    <div class="text-muted mb-12">Ändere Name, Emoji, Farbe und Mindestpunktzahl jedes Rangs. Der höchste Rang gilt ab seiner Mindestpunktzahl unbegrenzt.</div>
+    <div id="rank-editor"></div>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="saveRanks()">💾 Alle Ränge speichern</button>
+      <button class="btn btn-secondary" onclick="addNewRank()">➕ Neuen Rang hinzufügen</button>
+    </div>
+  </div>
+
+  <div class="grid-2 mb-20">
+    <div class="card">
+      <div class="card-title">👤 Schüler verwalten</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+        <button class="btn btn-secondary btn-sm" onclick="openAddStudentModal()">+ Schüler hinzufügen</button>
+        <select class="form-input" id="student-sort" style="width:auto;padding:7px 12px;font-size:13px;" onchange="renderStudentManage()">
+          <option value="last-az">Nachname A–Z</option>
+          <option value="first-az">Vorname A–Z</option>
+          <option value="points-desc">Punkte ↓</option>
+          <option value="points-asc">Punkte ↑</option>
+          <option value="streak-desc">Streak ↓</option>
+          <option value="streak-asc">Streak ↑</option>
+        </select>
+      </div>
+      <div id="student-manage-list"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📦 Belohnungen verwalten</div>
+      <button class="btn btn-secondary btn-sm mb-12" onclick="openAddRewardModal()">+ Neue Belohnung</button>
+      <div id="reward-manage-list"></div>
+    </div>
+  </div>
+  </div><!-- /mobile-settings -->
+
+</div><!-- /view-teacher -->
+
+<!-- SCHÜLER-ANSICHT -->
+<div id="view-student" class="view">
+
+  <div class="motiv-box mb-20">
+    <div style="font-family:'Fredoka One',cursive;font-size:14px;color:var(--gold-light);margin-bottom:8px;">✨ Dein täglicher Mutmacher</div>
+    <div class="motiv-loading" id="motiv-quote">✨ Dein persönlicher Mutmacher erscheint gleich…</div>
+    <div style="font-size:12px;opacity:0.55;margin-top:6px;">– KI-generiert für dich</div>
+    <button class="btn btn-sm" style="margin-top:12px;background:rgba(255,255,255,0.12);color:white;border:none;" onclick="loadMotivation()">🔄 Neuer Spruch</button>
+  </div>
+
+  <div class="profile-hero">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+      <div>
+        <div style="font-family:'Fredoka One',cursive;font-size:18px;color:var(--gold);margin-bottom:4px;" id="sp-name">—</div>
+        <div id="sp-rank-badge"></div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:48px;font-family:'Fredoka One',cursive;color:var(--gold-light);" id="sp-points">0</div>
+        <div style="font-size:13px;opacity:0.7;">⭐ Punkte</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:16px;margin-top:16px;flex-wrap:wrap;">
+      <div><div style="font-size:11px;opacity:0.55;">Mein Streak</div><div style="font-family:'Fredoka One',cursive;font-size:20px;color:#FF9F43;" id="sp-streak">0 🔥</div></div>
+      <div><div style="font-size:11px;opacity:0.55;">Klassen-Ø</div><div style="font-family:'Fredoka One',cursive;font-size:20px;color:var(--blue-soft);" id="sp-avg">0 ⭐</div></div>
+      <div><div style="font-size:11px;opacity:0.55;">Mein Rang</div><div style="font-family:'Fredoka One',cursive;font-size:20px;color:white;" id="sp-pos">—</div></div>
+    </div>
+    <div style="margin-top:16px;">
+      <div style="display:flex;justify-content:space-between;font-size:11px;opacity:0.6;margin-bottom:4px;"><span>Fortschritt zum nächsten Rang</span><span id="sp-rank-pct">—</span></div>
+      <div class="progress-bar" style="background:rgba(255,255,255,0.15);"><div class="progress-fill" id="sp-rank-progress" style="width:0%"></div></div>
+      <div style="font-size:11px;opacity:0.45;margin-top:4px;" id="sp-next-rank-text">—</div>
+    </div>
+  </div>
+
+  <div class="card mb-20">
+    <div class="card-title">📊 Punkte-Vergleich mit der Klasse</div>
+    <div class="compare-bar"><div class="compare-label">Deine Punkte</div><div class="compare-track"><div class="compare-fill mine" id="sp-compare-mine" style="width:0%"></div></div><span id="sp-compare-mine-val" style="font-weight:700;width:32px;text-align:right;">0</span></div>
+    <div class="compare-bar"><div class="compare-label">Klassen-Ø</div><div class="compare-track"><div class="compare-fill avg" id="sp-compare-avg" style="width:0%"></div></div><span id="sp-compare-avg-val" style="font-weight:700;width:32px;text-align:right;color:var(--blue-soft);">0</span></div>
+    <div id="sp-compare-msg" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
+  </div>
+
+  <div class="mb-20">
+    <div class="card"><div class="card-title">📅 Letzte Aktivitäten</div><div id="sp-log"></div></div>
+  </div>
+
+  <div class="card mb-20"><div class="card-title">🎁 Belohnungen einlösen</div><div class="reward-grid" id="sp-reward-grid"></div></div>
+
+  <div class="card mb-20">
+    <div class="card-title">🏫 Klassen-Belohnungspfad</div>
+    <div class="gap-12 mb-20"><div><div class="stat-val" id="sp-class-pts">0</div><div class="text-muted" style="font-size:12px;">Klassenpunkte (kumuliert)</div></div></div>
+    <div class="milestone-path" id="sp-milestone-path"><div class="milestone-connector"></div></div>
+  </div>
+
+  <div class="card mb-20" id="sp-theme-card">
+    <div class="card-title">🎨 Darstellung anpassen</div>
+    <div style="display:flex;flex-wrap:wrap;gap:24px;">
+
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">Hintergrundfarbe (ganze Seite)</div>
+        <div class="color-picker-row">
+          <input type="color" id="sp-bg-color" value="#F0F4F8" oninput="spColorFromPicker('bg')" title="Farbwähler">
+          <input type="text" id="sp-bg-hex" value="#F0F4F8" maxlength="7" oninput="spColorFromHex('bg')" style="text-transform:uppercase;">
+          <span class="rgb-label">R</span><input type="number" id="sp-bg-r" min="0" max="255" value="240" oninput="spColorFromRgb('bg')">
+          <span class="rgb-label">G</span><input type="number" id="sp-bg-g" min="0" max="255" value="244" oninput="spColorFromRgb('bg')">
+          <span class="rgb-label">B</span><input type="number" id="sp-bg-b" min="0" max="255" value="248" oninput="spColorFromRgb('bg')">
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">Overlay-Farbe (alle Kästen)</div>
+        <div class="color-picker-row">
+          <input type="color" id="sp-overlay-color" value="#1B2D4F" oninput="spColorFromPicker('overlay')" title="Farbwähler">
+          <input type="text" id="sp-overlay-hex" value="#1B2D4F" maxlength="7" oninput="spColorFromHex('overlay')" style="text-transform:uppercase;">
+          <span class="rgb-label">R</span><input type="number" id="sp-overlay-r" min="0" max="255" value="27" oninput="spColorFromRgb('overlay')">
+          <span class="rgb-label">G</span><input type="number" id="sp-overlay-g" min="0" max="255" value="45" oninput="spColorFromRgb('overlay')">
+          <span class="rgb-label">B</span><input type="number" id="sp-overlay-b" min="0" max="255" value="79" oninput="spColorFromRgb('overlay')">
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">Textfarbe (Überschriften &amp; Zahlen)</div>
+        <div class="color-picker-row">
+          <input type="color" id="sp-text-color" value="#1B2D4F" oninput="spColorFromPicker('text')" title="Farbwähler">
+          <input type="text" id="sp-text-hex" value="#1B2D4F" maxlength="7" oninput="spColorFromHex('text')" style="text-transform:uppercase;">
+          <span class="rgb-label">R</span><input type="number" id="sp-text-r" min="0" max="255" value="27" oninput="spColorFromRgb('text')">
+          <span class="rgb-label">G</span><input type="number" id="sp-text-g" min="0" max="255" value="45" oninput="spColorFromRgb('text')">
+          <span class="rgb-label">B</span><input type="number" id="sp-text-b" min="0" max="255" value="79" oninput="spColorFromRgb('text')">
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;">🌙 Dark Mode</div>
+        <label class="theme-toggle-switch">
+          <input type="checkbox" id="sp-dark-toggle" onchange="toggleStudentDark()">
+          <span class="theme-toggle-slider"></span>
+        </label>
+      </div>
+
+      <div style="display:flex;align-items:flex-end;">
+        <button class="btn btn-secondary btn-sm" onclick="resetStudentTheme()">↺ Zurücksetzen</button>
+      </div>
+
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:10px;">Im Dark Mode sind eigene Farben deaktiviert — es wird automatisch ein dunkler Hintergrund mit gut lesbarer, heller Schrift verwendet.</div>
+  </div>
+</div>
+
+</main>
+</div><!-- /#app -->
+
+<!-- MODALS -->
+<div class="modal-overlay" id="modal-teacher">
+  <div class="modal">
+    <div class="modal-title" id="teacher-modal-title">👩‍🏫 Lehrkraft anlegen</div>
+    <div id="teacher-create-fields">
+      <div class="form-group"><label class="form-label">Name</label><input type="text" class="form-input" id="new-teacher-name" placeholder="z.B. Frau Müller"></div>
+      <div class="form-group"><label class="form-label">E-Mail (Login)</label><input type="email" class="form-input" id="new-teacher-email" placeholder="z.B. mueller@schule.de"></div>
+      <div class="form-group"><label class="form-label">Passwort (mind. 6 Zeichen)</label><input type="text" class="form-input" id="new-teacher-password" placeholder="Startpasswort"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Zugewiesene Klassen</label>
+      <div id="teacher-class-checks" style="display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;"></div>
+    </div>
+    <div class="gap-12 mt-20">
+      <button class="btn btn-primary" id="teacher-save-btn" onclick="saveTeacher()">Anlegen</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-teacher')">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-add-student">
+  <div class="modal">
+    <div class="modal-title">👤 Schüler hinzufügen</div>
+    <div class="form-group"><label class="form-label">Vorname</label><input type="text" class="form-input" id="new-student-first" placeholder="Vorname"></div>
+    <div class="form-group"><label class="form-label">Nachname</label><input type="text" class="form-input" id="new-student-last" placeholder="Nachname"></div>
+    <div class="form-group"><label class="form-label">E-Mail-Adresse (Login)</label><input type="email" class="form-input" id="new-student-email" placeholder="z.B. anna.mueller@schule.de"></div>
+    <div class="form-group"><label class="form-label">Passwort</label><input type="text" class="form-input" id="new-student-password" placeholder="Passwort für den Schüler"></div>
+    <div class="gap-12 mt-20">
+      <button class="btn btn-primary" id="add-student-btn" onclick="addStudent()">Hinzufügen</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-add-student')">Abbrechen</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="modal-add-reward">
+  <div class="modal">
+    <div class="modal-title" id="reward-modal-title">🎁 Neue Belohnung</div>
+    <div class="form-group"><label class="form-label">Name</label><input type="text" class="form-input" id="new-reward-name" placeholder="Name"></div>
+    <div class="form-group"><label class="form-label">Beschreibung</label><input type="text" class="form-input" id="new-reward-desc" placeholder="Kurze Beschreibung"></div>
+    <div class="form-group"><label class="form-label">Icon (Emoji)</label><input type="text" class="form-input" id="new-reward-icon" placeholder="🎁" maxlength="4"></div>
+    <div class="form-group"><label class="form-label">Kosten (Punkte)</label><input type="number" class="form-input" id="new-reward-cost" placeholder="z.B. 10" min="1"></div>
+    <div class="form-group"><label class="form-label">Typ</label>
+      <select class="form-input" id="new-reward-type"><option value="individual">Einzeln (pro Schüler)</option><option value="class">Klasse (Meilenstein)</option></select>
+    </div>
+    <div class="gap-12 mt-20">
+      <button class="btn btn-primary" id="reward-save-btn" onclick="saveReward()">Hinzufügen</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-add-reward')">Abbrechen</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="modal-adjust-points">
+  <div class="modal">
+    <div class="modal-title" id="adjust-modal-title">Punkte anpassen</div>
+    <div class="form-group"><label class="form-label">Anzahl Punkte (optional)</label><input type="number" class="form-input" id="adjust-points-val" placeholder="leer lassen = unverändert" min="1"></div>
+    <div class="form-group"><label class="form-label">Grund (optional)</label><input type="text" class="form-input" id="adjust-points-reason" placeholder="z.B. Extra-Einsatz"></div>
+    <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;">
+    <div class="form-group"><label class="form-label">Streak festlegen (optional)</label><input type="number" class="form-input" id="adjust-streak-val" placeholder="leer lassen = unverändert" min="0"></div>
+    <div class="form-group"><label class="form-label">Rang festlegen (optional)</label>
+      <select class="form-input" id="adjust-rank-val"><option value="">— nicht ändern —</option></select>
+    </div>
+    <div class="gap-12 mt-20">
+      <button class="btn btn-primary" id="adjust-confirm-btn">Anpassen</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-adjust-points')">Abbrechen</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"><span id="toast-icon">✅</span><span id="toast-msg">Gespeichert!</span></div>
+
+<script>
+
+
+// Standard-Ränge (werden aus Firebase überschrieben wenn dort gespeichert)
+let RANKS = [
+  { name:'Holz',   min:0,   max:9,   cls:'rank-holz',   icon:'🪵' },
+  { name:'Stein',  min:10,  max:19,  cls:'rank-stein',  icon:'🪨' },
+  { name:'Kupfer', min:20,  max:34,  cls:'rank-kupfer', icon:'🟤' },
+  { name:'Bronze', min:35,  max:49,  cls:'rank-bronze', icon:'🥉' },
+  { name:'Silber', min:50,  max:74,  cls:'rank-silber', icon:'🥈' },
+  { name:'Gold',   min:75,  max:99,  cls:'rank-gold',   icon:'🥇' },
+  { name:'Platin', min:100, max:Infinity, cls:'rank-platin', icon:'💎' },
+];
+// Der Rang basiert NICHT auf den aktuell verfügbaren (ausgebbaren) Punkten,
+// sondern auf der höchsten je erreichten Punktzahl (rankPoints). So behält
+// ein Schüler seinen Rang, auch wenn er Punkte für Belohnungen ausgibt.
+function displayRankValue(s) {
+  return Math.max(s.rankPoints||0, s.points||0);
+}
+// Nächster rankPoints-Wert nach einer Punkteänderung: steigt automatisch mit,
+// sinkt aber nie von selbst (nur ein gezieltes "Rang festlegen" kann ihn senken).
+function nextRankPoints(student, newPoints) {
+  return Math.max(student.rankPoints||0, student.points||0, newPoints||0);
+}
+function getRank(points) {
+  const sorted = [...RANKS].sort((a,b) => a.min - b.min);
+  return sorted.slice().reverse().find(r => points >= r.min) || sorted[0];
+}
+function getRankBadgeHTML(points) {
+  const r = getRank(points);
+  const style = r.color ? `style="background:${r.color};color:${isLight(r.color)?'#1B2D4F':'white'}"` : '';
+  return `<span class="rank-badge ${r.color ? 'rank-custom' : r.cls}" ${style}>${r.icon} ${r.name}</span>`;
+}
+function isLight(hex) {
+  const c = hex.replace('#','');
+  if (c.length < 6) return false;
+  const r=parseInt(c.substr(0,2),16), g=parseInt(c.substr(2,2),16), b=parseInt(c.substr(4,2),16);
+  return (r*299+g*587+b*114)/1000 > 160;
+}
+
+
+let state = {
+  students: [],
+  rewards: [],
+  hwStatus: {},
+  classPointsTotal: 0,
+  classBonus: 5,
+  classStudentBonus: 0,   // Punkte pro Schüler beim Klassenbonus (Standard: 0 → jeder bekommt 0 extra)
+  classBonusThreshold: 90, // Prozent-Schwelle, ab der der Klassenbonus verfügbar wird (Standard: 90%)
+  classBonusScheduled: {},
+  classStreak: 0,
+  redeemLog: [],
+  currentUser: null,
+  // --- Mehrklassen-System ---
+  classId: null,          // aktuell geöffnete Klasse
+  classes: [],            // für Lehrer/Admin auswählbare Klassen [{id,name}]
+  allClasses: [],         // (Admin) alle Klassen
+  teachers: [],           // (Admin) alle Lehrkräfte [{id,name,email,classes:{}}]
+};
+
+const DEFAULT_RANKS = RANKS.map(r => ({ ...r }));
+
+function fb() { return window._fb; }
+
+// ---------- Klassenbezogene Pfade: alles landet unter classData/{classId}/ ----------
+function cpath(p) {
+  if (!state.classId) { showToast('❗ Keine Klasse ausgewählt.', 'error'); throw new Error('Keine Klasse ausgewählt'); }
+  return `classData/${state.classId}/${p}`;
+}
+function cref(p) { return fb().ref(fb().db, cpath(p)); }
+// ---------- Globale Pfade (Admin-Verwaltung: users, classes, teachers …) ----------
+function gref(p) { return fb().ref(fb().db, p); }
+
+async function fbSet(path, value) {
+  setSyncing(true);
+  try { await fb().set(cref(path), value); } finally { setSyncing(false); }
+}
+async function fbUpdate(path, value) {
+  setSyncing(true);
+  try { await fb().update(cref(path), value); } finally { setSyncing(false); }
+}
+async function fbUpdateRoot(updates) {
+  setSyncing(true);
+  try {
+    // Gruppiere Updates nach Toplevel-Pfad (innerhalb der Klasse) und führe sie einzeln aus
+    const grouped = {};
+    for (const [fullKey, val] of Object.entries(updates)) {
+      const top = fullKey.split('/')[0];
+      if (!grouped[top]) grouped[top] = {};
+      if (fullKey.includes('/')) {
+        grouped[top][fullKey.slice(top.length + 1)] = val;
+      } else {
+        grouped[top] = val;
+      }
+    }
+    for (const [topPath, topVal] of Object.entries(grouped)) {
+      if (typeof topVal === 'object' && topVal !== null && !Array.isArray(topVal)) {
+        await fb().update(cref(topPath), topVal);
+      } else {
+        await fb().set(cref(topPath), topVal);
+      }
+    }
+  } finally { setSyncing(false); }
+}
+async function fbRemove(path) {
+  setSyncing(true);
+  try { await fb().remove(cref(path)); } finally { setSyncing(false); }
+}
+// globale Varianten
+async function gSet(path, value)    { setSyncing(true); try { await fb().set(gref(path), value); }    finally { setSyncing(false); } }
+async function gUpdate(path, value) { setSyncing(true); try { await fb().update(gref(path), value); } finally { setSyncing(false); } }
+async function gRemove(path)        { setSyncing(true); try { await fb().remove(gref(path)); }       finally { setSyncing(false); } }
+
+function setSyncing(active) {
+  const dot = document.getElementById('sync-dot');
+  if (!dot) return;
+  dot.className = active ? 'sync-dot syncing' : 'sync-dot';
+}
+
+// ---------- Realtime-Listener pro Klasse (mit sauberem Abmelden beim Klassenwechsel) ----------
+let classUnsubs = [];
+function stopClassListeners() {
+  classUnsubs.forEach(u => { try { u(); } catch(e) {} });
+  classUnsubs = [];
+}
+function resetClassState() {
+  state.students = []; state.rewards = []; state.hwStatus = {};
+  state.classPointsTotal = 0; state.classBonus = 5; state.classStudentBonus = 0;
+  state.classBonusThreshold = 90; state.classBonusScheduled = {}; state.classStreak = 0;
+  state.redeemLog = [];
+  RANKS = DEFAULT_RANKS.map(r => ({ ...r }));
+}
+
+function startClassListeners(classId) {
+  stopClassListeners();
+  resetClassState();
+  state.classId = classId || null;
+  if (!classId) { reRender(); return; }
+
+  const { db, ref, onValue } = fb();
+  const base = `classData/${classId}/`;
+  const on = (p, cb) => classUnsubs.push(
+    onValue(ref(db, base + p), cb, err => console.error('Listener-Fehler (' + p + '):', err))
+  );
+
+  on('students', snap => {
+    const data = snap.val() || {};
+    state.students = Object.entries(data).map(([id, s]) => ({ ...s, id }));
+    reRender();
+  });
+
+  on('rewards', snap => {
+    const data = snap.val() || {};
+    state.rewards = Object.entries(data).map(([id, r]) => ({ ...r, id }));
+    reRender();
+  });
+
+  on('hwStatus', snap => {
+    state.hwStatus = snap.val() || {};
+    reRender();
+  });
+
+  on('meta', snap => {
+    const m = snap.val() || {};
+    state.classPointsTotal    = m.classPointsTotal    || 0;
+    state.classBonus          = m.classBonus          || 5;
+    state.classStudentBonus   = m.classStudentBonus   !== undefined ? m.classStudentBonus : 0;
+    state.classBonusThreshold = m.classBonusThreshold || 90;
+    state.classBonusScheduled = m.classBonusScheduled || {};
+    state.classStreak         = m.classStreak         || 0;
+    if (m.ranks && Array.isArray(m.ranks) && m.ranks.length > 0) {
+      RANKS = m.ranks.map((r, i) => ({
+        name:  r.name  || 'Rang',
+        icon:  r.icon  || '⭐',
+        min:   r.min   || 0,
+        cls:   r.cls   || 'rank-custom',
+        color: r.color || null,
+        max:   i < m.ranks.length - 1 ? (m.ranks[i+1].min - 1) : Infinity,
+      }));
+    } else {
+      RANKS = DEFAULT_RANKS.map(r => ({ ...r }));
+    }
+    reRender();
+  });
+
+  on('redeemLog', snap => {
+    const data = snap.val() || {};
+    state.redeemLog = Object.entries(data)
+      .map(([id, entry]) => ({ ...entry, _id: id }))
+      .reverse();
+    reRender();
+  });
+}
+
+function reRender() {
+  if (!state.currentUser) return;
+  if (state.currentUser.role === 'teacher' || state.currentUser.role === 'admin') render();
+  else renderStudentView();
+}
+
+// ============================================================
+// LOGIN / LOGOUT
+// ============================================================
+
+// Admin wird über die E-Mail erkannt. Lehrkräfte und Schüler über ihre Profile in der Datenbank
+// (teachers/{uid} bzw. studentIndex/{uid}), die der Admin / die Lehrkraft beim Anlegen erzeugt.
+const ADMIN_EMAIL = 'admin@hausaufgabenheld.de';
+
+const LOGIN_ERRORS = {
+  'auth/invalid-email':            '❌ Ungültige E-Mail-Adresse.',
+  'auth/user-not-found':           '❌ Kein Account mit dieser E-Mail gefunden.',
+  'auth/wrong-password':           '❌ Falsches Passwort.',
+  'auth/invalid-credential':       '❌ E-Mail oder Passwort ist falsch.',
+  'auth/invalid-login-credentials':'❌ E-Mail oder Passwort ist falsch.',
+  'auth/too-many-requests':        '❌ Zu viele Versuche. Bitte kurz warten und erneut versuchen.',
+  'auth/network-request-failed':   '❌ Keine Verbindung zu Firebase. Internet prüfen.',
+  'auth/user-disabled':            '❌ Dieser Account wurde deaktiviert.',
+  'auth/operation-not-allowed':    '❌ Anmeldung per E-Mail/Passwort ist in der Firebase-Konsole deaktiviert (Authentication → Sign-in method).',
+  'auth/configuration-not-found':  '❌ Firebase-Auth ist für dieses Projekt nicht eingerichtet (Authentication → Sign-in method → E-Mail/Passwort aktivieren).'
+};
+function showLoginError(msg) {
+  const err = document.getElementById('login-error');
+  err.textContent = msg; err.style.display = 'block';
+}
+function resetLoginButton() {
+  const btn = document.querySelector('#login-screen .btn-primary');
+  if (btn) { btn.textContent = 'Anmelden'; btn.disabled = false; }
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-user').value.trim().toLowerCase();
+  const pass  = document.getElementById('login-pass').value;
+  const err   = document.getElementById('login-error');
+  const btn   = document.querySelector('#login-screen .btn-primary');
+  err.style.display = 'none';
+  btn.textContent = 'Anmelden…';
+  btn.disabled = true;
+  try {
+    // Das Anmelden selbst genügt: alles Weitere (Profil laden, Ansicht starten)
+    // erledigt onAuthStateChanged — so gibt es nur EINEN Login-Pfad ohne Wettlauf.
+    await fb().signInWithEmailAndPassword(fb().auth, email, pass);
+  } catch(e) {
+    console.error('Login-Fehler:', e);
+    showLoginError(LOGIN_ERRORS[e.code] || `❌ Fehler: ${e.code || e.message || e}`);
+    resetLoginButton();
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('login-screen').classList.contains('visible')) doLogin();
+});
+
+// Profil des angemeldeten Firebase-Nutzers ermitteln: Admin / Lehrkraft / Schüler
+async function resolveProfile(user) {
+  const email = (user.email || '').toLowerCase();
+  if (email === ADMIN_EMAIL) {
+    return { uid: user.uid, email, role: 'admin', name: 'Systemadministrator', classIds: [] };
+  }
+  const t = await fb().get(gref('teachers/' + user.uid));
+  if (t.exists()) {
+    const v = t.val();
+    return { uid: user.uid, email, role: 'teacher', name: v.name || 'Lehrkraft', classIds: Object.keys(v.classes || {}) };
+  }
+  const st = await fb().get(gref('studentIndex/' + user.uid));
+  if (st.exists()) {
+    const v = st.val();
+    return { uid: user.uid, email, role: 'student', name: v.name || 'Schüler', classId: v.classId, studentId: v.studentId };
+  }
+  return null;
+}
+
+// ---------- globale Listener für Lehrkräfte/Admin (Klassenliste, Lehrkräfte) ----------
+let globalUnsubs = [];
+function stopGlobalListeners() {
+  globalUnsubs.forEach(u => { try { u(); } catch(e) {} });
+  globalUnsubs = [];
+}
+function startGlobalListeners() {
+  stopGlobalListeners();
+  const { db, ref, onValue } = fb();
+  const u = state.currentUser;
+  const on = (p, cb) => globalUnsubs.push(onValue(ref(db, p), cb, err => console.error('Listener-Fehler (' + p + '):', err)));
+
+  on('classes', snap => {
+    const data = snap.val() || {};
+    state.allClasses = Object.entries(data).map(([id, c]) => ({ id, name: (c && c.name) || id }));
+    refreshClasses();
+  });
+
+  if (u.role === 'admin') {
+    on('teachers', snap => {
+      const data = snap.val() || {};
+      state.teachers = Object.entries(data).map(([id, t]) => ({ id, ...t }));
+      renderAdminPanel();
+    });
+  } else {
+    // Lehrkraft: Zuweisungen live nachladen, falls der Admin sie ändert
+    on('teachers/' + u.uid, snap => {
+      const v = snap.val();
+      state.currentUser.classIds = Object.keys((v && v.classes) || {});
+      refreshClasses();
+    });
+  }
+}
+
+function sortedByName(list) {
+  return [...list].sort((a, b) => a.name.localeCompare(b.name, 'de', { numeric: true }));
+}
+
+// Auswählbare Klassen bestimmen und sicherstellen, dass eine gültige Klasse offen ist
+function refreshClasses() {
+  const u = state.currentUser;
+  if (!u || u.role === 'student') return;
+  const mine = u.role === 'admin' ? state.allClasses : state.allClasses.filter(c => (u.classIds || []).includes(c.id));
+  state.classes = sortedByName(mine);
+
+  if (!state.classId || !state.classes.some(c => c.id === state.classId)) {
+    let saved = null;
+    try { saved = localStorage.getItem('hh_lastClass_' + u.uid); } catch(e) {}
+    const target = state.classes.some(c => c.id === saved) ? saved : (state.classes[0] ? state.classes[0].id : null);
+    if (target !== state.classId) startClassListeners(target);
+  }
+  renderClassSwitcher();
+  renderAdminPanel();
+  reRender();
+}
+
+function renderClassSwitcher() {
+  const bar = document.getElementById('class-switcher-bar');
+  if (!bar) return;
+  const sel = document.getElementById('class-switch-select');
+  const hint = document.getElementById('class-empty-hint');
+  if (!state.classes.length) {
+    sel.innerHTML = '<option value="">– keine Klasse –</option>';
+    hint.style.display = '';
+    hint.textContent = state.currentUser.role === 'admin'
+      ? 'Noch keine Klasse vorhanden. Lege unter „Mehr“ → „Klassen & Lehrkräfte“ eine Klasse an.'
+      : 'Dir wurde noch keine Klasse zugewiesen. Bitte beim Administrator melden.';
+    return;
+  }
+  hint.style.display = 'none';
+  sel.innerHTML = state.classes.map(c => `<option value="${c.id}"${c.id === state.classId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+}
+
+function switchClass(id) {
+  if (!id || id === state.classId) return;
+  try { localStorage.setItem('hh_lastClass_' + state.currentUser.uid, id); } catch(e) {}
+  startClassListeners(id);
+  renderClassSwitcher();
+  showToast('🏫 Klasse gewechselt', 'info');
+}
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+async function doLogout() {
+  stopGlobalListeners();
+  stopClassListeners();
+  await fb().signOut(fb().auth);
+  state.currentUser = null;
+  state.classId = null; state.classes = []; state.allClasses = []; state.teachers = [];
+  resetClassState();
+  resetGlobalStudentTheming();
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-screen').classList.add('visible');
+  resetLoginButton();
+}
+
+function startApp() {
+  document.getElementById('login-screen').classList.remove('visible');
+  document.getElementById('app').style.display = 'block';
+  resetGlobalStudentTheming();
+  const role = state.currentUser.role;
+  const badgeIcon = role === 'admin' ? '🛡️' : role === 'teacher' ? '👩‍🏫' : '🎒';
+  document.getElementById('header-user-badge').textContent = badgeIcon + ' ' + state.currentUser.name;
+  document.getElementById('header-date').textContent =
+    new Date().toLocaleDateString('de-DE', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+
+  if (role === 'teacher' || role === 'admin') {
+    document.getElementById('view-teacher').classList.add('active');
+    document.getElementById('view-student').classList.remove('active');
+    document.querySelectorAll('.admin-only').forEach(el => el.style.display = role === 'admin' ? '' : 'none');
+    document.querySelectorAll('.teacher-only').forEach(el => el.style.display = role === 'teacher' ? '' : 'none');
+    startGlobalListeners();   // lädt Klassenliste → öffnet automatisch die erste/zuletzt benutzte Klasse
+    render();
+    setTimeout(() => initMobileNav(), 100);
+  } else {
+    document.getElementById('view-teacher').classList.remove('active');
+    document.getElementById('view-student').classList.add('active');
+    startClassListeners(state.currentUser.classId);
+    renderStudentView();
+    loadMotivation();
+    // Mobile Nav für Schüler anpassen
+    if (isMobile()) {
+      const nav = document.getElementById('mobile-nav');
+      if (nav) {
+        nav.innerHTML = `
+          <button class="mobile-nav-btn active" id="nav-btn-profile" onclick="mobileNavStudent('profile')">
+            <span class="nav-icon">⭐</span>Profil
+          </button>
+          <button class="mobile-nav-btn" id="nav-btn-rewards-s" onclick="mobileNavStudent('rewards-s')">
+            <span class="nav-icon">🎁</span>Bel.
+          </button>
+          <button class="mobile-nav-btn" id="nav-btn-class" onclick="mobileNavStudent('class')">
+            <span class="nav-icon">🏫</span>Klasse
+          </button>`;
+        nav.style.display = 'flex';
+      }
+    }
+  }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+async function initApp() {
+  const d = document.getElementById('hw-date');
+  d.value = today();
+  d.addEventListener('change', () => { renderHWCheck(); renderStats(); });
+
+  // Warte bis Firebase bereit ist (max. 10 Sekunden)
+  const ready = await new Promise((resolve) => {
+    if (window._fbReady) { resolve(true); return; }
+    window.addEventListener('firebase-ready', () => resolve(true), { once: true });
+    setTimeout(() => resolve(false), 10000);
+  });
+
+  if (!ready || !window._fb) {
+    document.getElementById('loading-overlay').style.display = 'none';
+    document.getElementById('config-warning').style.display = 'flex';
+    return;
+  }
+
+  // onAuthStateChanged ist der EINZIGE Einstiegspunkt: Session-Wiederherstellung UND frischer Login.
+  // Daten-Listener starten erst, wenn Profil und Klasse feststehen (also nach bestätigter Anmeldung).
+  fb().onAuthStateChanged(fb().auth, async (user) => {
+    document.getElementById('loading-overlay').style.display = 'none';
+
+    if (!user) {
+      document.getElementById('login-screen').classList.add('visible');
+      resetLoginButton();
+      return;
+    }
+
+    try {
+      const profile = await resolveProfile(user);
+      if (!profile) {
+        await fb().signOut(fb().auth);
+        document.getElementById('login-screen').classList.add('visible');
+        showLoginError('❌ Für diesen Account gibt es kein Profil (nicht als Lehrkraft/Schüler angelegt oder bereits entfernt). Bitte beim Administrator melden.');
+        resetLoginButton();
+        return;
+      }
+      if (profile.role === 'student' && !profile.classId) {
+        await fb().signOut(fb().auth);
+        document.getElementById('login-screen').classList.add('visible');
+        showLoginError('❌ Diesem Schüler-Account ist keine Klasse zugeordnet.');
+        resetLoginButton();
+        return;
+      }
+      state.currentUser = profile;
+      startApp();
+    } catch(e) {
+      console.error('Profil-Fehler:', e);
+      try { await fb().signOut(fb().auth); } catch(_) {}
+      document.getElementById('login-screen').classList.add('visible');
+      showLoginError(e && e.code === 'PERMISSION_DENIED'
+        ? '❌ Zugriff verweigert. Bitte Firebase-Regeln prüfen (database.rules.multiklasse.json).'
+        : `❌ Fehler beim Laden des Profils: ${e.message || e}`);
+    } finally {
+      resetLoginButton();
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initApp().catch(e => console.error('App-Init Fehler:', e));
+});
+
+function today() { return new Date().toISOString().split('T')[0]; }
+
+// ============================================================
+// MOBILE NAVIGATION
+// ============================================================
+const MOBILE_SECTIONS = ['home','hw','rank','rewards','settings'];
+
+function isMobile() {
+  return window.innerWidth <= 600 && window.matchMedia('(pointer:coarse)').matches;
+}
+
+function mobileNav(section) {
+  if (!isMobile()) return;
+
+  // Alle Sections ausblenden
+  MOBILE_SECTIONS.forEach(s => {
+    const el = document.getElementById(`mobile-${s}`);
+    if (el) el.classList.remove('active');
+  });
+
+  // Gewählte Section einblenden
+  const target = document.getElementById(`mobile-${section}`);
+  if (target) target.classList.add('active');
+
+  // Nav-Buttons aktualisieren
+  MOBILE_SECTIONS.forEach(s => {
+    const btn = document.getElementById(`nav-btn-${s}`);
+    if (btn) btn.classList.toggle('active', s === section);
+  });
+
+  // Charts neu rendern wenn Rank-Section geöffnet wird
+  if (section === 'rank') {
+    setTimeout(() => renderCharts(), 50);
+  }
+
+  // Nach oben scrollen
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+function initMobileNav() {
+  if (!isMobile()) {
+    // Desktop: alle Sections sichtbar
+    MOBILE_SECTIONS.forEach(s => {
+      const el = document.getElementById(`mobile-${s}`);
+      if (el) el.style.display = 'block';
+    });
+    return;
+  }
+  // Mobile: nur Home sichtbar, Rest per Nav
+  mobileNav('home');
+}
+
+function mobileNavStudent(section) {
+  const sections = {
+    'profile':   ['motiv-box','profile-hero-wrap','compare-wrap','log-wrap'],
+    'rewards-s': ['rewards-wrap'],
+    'class':     ['class-milestone-wrap'],
+  };
+  // Einfach alles zeigen auf Mobile — Schüler-Sections sind weniger komplex
+  // Nur Nav-Button aktiv markieren
+  ['profile','rewards-s','class'].forEach(s => {
+    const btn = document.getElementById(`nav-btn-${s}`);
+    if (btn) btn.classList.toggle('active', s === section);
+  });
+}
+
+// Bei Resize prüfen ob Ansicht wechselt
+window.addEventListener('resize', () => {
+  if (!isMobile()) {
+    MOBILE_SECTIONS.forEach(s => {
+      const el = document.getElementById(`mobile-${s}`);
+      if (el) { el.classList.add('active'); el.style.display = 'block'; }
+    });
+    document.getElementById('mobile-nav').style.display = 'none';
+  } else {
+    document.getElementById('mobile-nav').style.display = 'flex';
+  }
+});
+
+// ============================================================
+// RENDER (LEHRER)
+// ============================================================
+let chartPoints = null, chartWeek = null;
+function render() {
+  renderStats();
+  renderHWCheck();
+  renderLeaderboard();
+  renderTopFlop();
+  renderStudentManage();
+  renderRewardManage();
+  renderMilestonePath('milestone-path', true);
+  renderRedeemLog();
+  updateClassMeter();
+  renderCharts();
+  renderRankEditor();
+  populateSettingInputs();
+}
+
+function renderStats() {
+  document.getElementById('stat-students').textContent = state.students.length;
+  const d = document.getElementById('hw-date').value || today();
+  const done = state.students.filter(s => state.hwStatus[`${s.id}_${d}`] === 'done').length;
+  document.getElementById('stat-today-done').textContent = done;
+  document.getElementById('stat-class-streak').textContent = state.classStreak;
+  document.getElementById('stat-class-pts').textContent = state.classPointsTotal;
+  if (document.getElementById('class-points-display2'))
+    document.getElementById('class-points-display2').textContent = state.classPointsTotal;
+
+  // Gesamt-HW Statistiken für alle Schüler — nur explizit kontrollierte Tage zählen,
+  // unkontrollierte Tage fließen nicht in die Wertung ein
+  let totalDone = 0, totalMissing = 0;
+  Object.entries(state.hwStatus).forEach(([key, val]) => {
+    if (val === 'done') totalDone++;
+    else if (val === 'missing') totalMissing++;
+  });
+  if (document.getElementById('stat-total-done'))
+    document.getElementById('stat-total-done').textContent = totalDone;
+  if (document.getElementById('stat-total-missing'))
+    document.getElementById('stat-total-missing').textContent = totalMissing;
+}
+
+// ============================================================
+// CLASS METER + TIMER
+// ============================================================
+function updateClassMeter() {
+  const d = document.getElementById('hw-date').value || today();
+  const threshold = state.classBonusThreshold || 90;
+  document.getElementById('class-threshold-display-1').textContent = threshold;
+  document.getElementById('class-threshold-display-2').textContent = threshold;
+  const total = state.students.length;
+  if (total === 0) { document.getElementById('class-pct-label').textContent = '0%'; document.getElementById('class-meter-fill').style.width = '0%'; return; }
+
+  const done = state.students.filter(s => state.hwStatus[`${s.id}_${d}`] === 'done').length;
+  const pct = Math.round((done / total) * 100);
+  document.getElementById('class-meter-fill').style.width = pct + '%';
+  document.getElementById('class-pct-label').textContent = pct + '%';
+  document.getElementById('class-bonus-display').textContent = state.classBonus;
+
+  const statusEl = document.getElementById('class-bonus-status');
+  const timerContainer = document.getElementById('timer-box-container');
+  const awarded = state.classBonusScheduled[d]?.awarded;
+
+  if (pct >= threshold && !awarded) {
+    statusEl.innerHTML = `<button class="btn btn-primary btn-sm" onclick="awardClassBonus('${d}')">🎉 ${threshold}% erreicht – Bonus jetzt auszahlen!</button>`;
+  } else if (awarded) {
+    statusEl.innerHTML = `<span style="color:var(--green);font-weight:700;">✅ Klassenbonus heute bereits ausgezahlt!</span>`;
+    document.getElementById('class-meter-fill').style.background = 'linear-gradient(90deg,#F5B700,#27AE60)';
+  } else {
+    statusEl.innerHTML = '';
+  }
+  timerContainer.innerHTML = '';
+}
+
+async function awardClassBonus(date) {
+  const threshold = state.classBonusThreshold || 90;
+  const updates = {};
+  const perStudent = state.classStudentBonus || 0;
+  state.students.forEach(s => {
+    const newPts = (s.points || 0) + perStudent;
+    updates[`students/${s.id}/points`] = newPts;
+    updates[`students/${s.id}/rankPoints`] = nextRankPoints(s, newPts);
+    const log = s.log || [];
+    const logEntry = perStudent > 0
+      ? { type:'class', pts:perStudent, text:`Klassenbonus (${threshold}%+ Klasse) +${perStudent}`, date }
+      : { type:'class', pts:0, text:`Klassenbonus: Klasse hat ${threshold}% erreicht!`, date };
+    updates[`students/${s.id}/log`] = [logEntry, ...log];
+  });
+  updates['meta/classPointsTotal'] = state.classPointsTotal + state.classBonus;
+  updates['meta/classStreak'] = (state.classStreak || 0) + 1;
+  updates[`meta/classBonusScheduled/${date}`] = { awarded: true };
+  await fbUpdateRoot(updates);
+  const msg = perStudent > 0
+    ? `🎉 Klassenbonus! +${state.classBonus} Klassenpunkte & alle Schüler +${perStudent}!`
+    : `🎉 Klassenbonus! +${state.classBonus} Klassenpunkte für die Klasse!`;
+  showToast(msg, 'success');
+}
+
+// ============================================================
+// HW CHECK
+// ============================================================
+function renderHWCheck() {
+  const d = document.getElementById('hw-date').value || today();
+  const q = (document.getElementById('hw-search').value || '').toLowerCase();
+  const grid = document.getElementById('hw-check-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  let filtered = state.students;
+  if (q) filtered = filtered.filter(s => `${s.first} ${s.last}`.toLowerCase().includes(q));
+
+  filtered.forEach(s => {
+    const key = `${s.id}_${d}`;
+    const status = state.hwStatus[key]; // 'done' | 'missing' | undefined = noch nicht kontrolliert
+    const div = document.createElement('div');
+    div.className = 'hw-check-item' + (status === 'done' ? ' done' : status === 'missing' ? ' missing' : ' unchecked');
+    const label = status === 'done' ? '✅ Erledigt' : status === 'missing' ? '❌ Fehlt' : '❔ Noch nicht kontrolliert';
+    div.innerHTML = `
+      <div>
+        <div class="hw-student-name">${s.first} ${s.last}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${label}</div>
+      </div>
+      <div class="hw-actions">
+        <button class="btn-hw btn-done ${status==='done'?'':'inactive'}" onclick="markHW('${s.id}','done')" title="Erledigt">✓</button>
+        <button class="btn-hw btn-miss ${status==='missing'?'':'inactive'}" onclick="markHW('${s.id}','missing')" title="Fehlt">✗</button>
+      </div>`;
+    grid.appendChild(div);
+  });
+  updateClassMeter();
+  renderStats();
+}
+
+async function markHW(studentId, newStatus) {
+  const d = document.getElementById('hw-date').value || today();
+  const key = `${studentId}_${d}`;
+  const student = state.students.find(s => s.id === studentId);
+  if (!student) return;
+
+  const prev = state.hwStatus[key]; // 'done' | 'missing' | undefined = noch nicht kontrolliert
+  if (prev === newStatus) return; // schon in diesem Zustand — nichts zu tun
+
+  const updates = {};
+  const log = [...(student.log || [])];
+
+  if (newStatus === 'missing') {
+    // von 'done' ODER von unkontrolliert -> 'missing': Punkt abziehen, Streak zurücksetzen
+    updates[`students/${studentId}/points`] = Math.max(0, (student.points||0) - 1);
+    updates[`students/${studentId}/rankPoints`] = nextRankPoints(student, Math.max(0,(student.points||0)-1));
+    updates[`students/${studentId}/streak`] = 0;
+    const filtered = log.filter(l => !(l.date === d && l.type === 'hw_done'));
+    filtered.unshift({ type:'hw_missing', pts:-1, text:'Hausaufgaben vergessen', date: d });
+    updates[`students/${studentId}/log`] = filtered;
+    updates[`hwStatus/${key}`] = 'missing';
+    showToast(`❌ ${student.first} -1 Punkt, Streak zurückgesetzt`, 'error');
+  } else if (newStatus === 'done') {
+    // von 'missing' ODER von unkontrolliert -> 'done': Punkt(e) gutschreiben, Streak erhöhen
+    let bonus = 1;
+    if ((student.streak||0) >= 4) bonus++;
+    if ((student.streak||0) >= 9) bonus++;
+    updates[`students/${studentId}/points`] = (student.points||0) + bonus;
+    updates[`students/${studentId}/rankPoints`] = nextRankPoints(student, (student.points||0)+bonus);
+    updates[`students/${studentId}/streak`] = (student.streak||0) + 1;
+    const filtered = log.filter(l => !(l.date === d && l.type === 'hw_missing'));
+    const streakMsg = ((student.streak||0)+1) >= 5 ? ` 🔥 ${(student.streak||0)+1}-Streak!` : '';
+    filtered.unshift({ type:'hw_done', pts:bonus, text:`Hausaufgaben erledigt${streakMsg}`, date: d });
+    updates[`students/${studentId}/log`] = filtered;
+    updates[`hwStatus/${key}`] = 'done';
+    showToast(`✅ ${student.first} +${bonus} Punkt${bonus>1?'e':''}${streakMsg}`, 'success');
+  }
+
+  if (Object.keys(updates).length) await fbUpdateRoot(updates);
+}
+
+// ============================================================
+// LEADERBOARD
+// ============================================================
+function renderLeaderboard() {
+  const sorted = [...state.students].sort((a,b) => (b.points||0)-(a.points||0));
+  const lb = document.getElementById('leaderboard');
+  if (!lb) return;
+  lb.innerHTML = '';
+  sorted.forEach((s,i) => {
+    const rc = i===0?'gold':i===1?'silver':i===2?'bronze':'';
+    const medals = ['🥇','🥈','🥉'];
+    const rank = getRank(displayRankValue(s));
+    lb.innerHTML += `<div class="lb-row">
+      <div class="lb-rank ${rc}">${i<3?medals[i]:i+1}</div>
+      <div class="lb-name">${s.first} ${s.last}</div>
+      <span class="rank-badge ${rank.cls}" style="font-size:11px;padding:2px 7px;">${rank.icon} ${rank.name}</span>
+      ${(s.streak||0)>0?`<div class="lb-streak">🔥 ${s.streak}</div>`:''}
+      <div class="lb-pts">${s.points||0} ⭐</div>
+    </div>`;
+  });
+}
+
+function renderTopFlop() {
+  const sortBy = document.getElementById('topflop-sort')?.value || 'points';
+  const keyFn = sortBy==='streak' ? (s=>s.streak||0)
+              : sortBy==='rank'   ? (s=>displayRankValue(s))
+              : (s=>s.points||0);
+  const fmtVal = (s) => sortBy==='streak' ? `🔥 ${s.streak||0}`
+                       : sortBy==='rank'   ? `${getRank(displayRankValue(s)).icon} ${getRank(displayRankValue(s)).name}`
+                       : `${s.points||0} ⭐`;
+  const sorted = [...state.students].sort((a,b) => keyFn(b)-keyFn(a));
+  const top = document.getElementById('top-students');
+  const flop = document.getElementById('flop-students');
+  if (!top) return;
+  top.innerHTML = ''; flop.innerHTML = '';
+  sorted.slice(0,3).forEach((s,i) => {
+    top.innerHTML += `<div class="topflop-row top"><span style="font-family:'Fredoka One',cursive;color:var(--green);">${['🥇','🥈','🥉'][i]}</span><span style="flex:1;font-weight:600;">${s.first} ${s.last}</span><span style="font-family:'Fredoka One',cursive;color:var(--gold);">${fmtVal(s)}</span>${sortBy!=='streak' && (s.streak||0)>0?`<span style="font-size:12px;color:#FF6B35;">🔥${s.streak}</span>`:''}</div>`;
+  });
+  [...sorted].reverse().slice(0,3).forEach(s => {
+    flop.innerHTML += `<div class="topflop-row flop"><span style="font-size:18px;">📉</span><span style="flex:1;font-weight:600;">${s.first} ${s.last}</span><span style="font-family:'Fredoka One',cursive;color:var(--red);">${fmtVal(s)}</span></div>`;
+  });
+  if (sorted.length===0) { top.innerHTML='<div class="text-muted">Keine Schüler.</div>'; flop.innerHTML='<div class="text-muted">Keine Schüler.</div>'; }
+}
+
+function renderCharts() {
+  if (state.students.length===0) return;
+  const sorted = [...state.students].sort((a,b)=>(b.points||0)-(a.points||0));
+  const ctxP = document.getElementById('chart-points');
+  if (!ctxP) return;
+  if (chartPoints) chartPoints.destroy();
+  chartPoints = new Chart(ctxP.getContext('2d'), {
+    type:'bar',
+    data: { labels:sorted.map(s=>s.first), datasets:[{ label:'Punkte', data:sorted.map(s=>s.points||0), backgroundColor:sorted.map((_,i)=>i===0?'#F5B700':i===1?'#A0AEC0':i===2?'#CD7F32':'#4A90D9'), borderRadius:8 }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
+  });
+  const days=[],dayLabels=[];
+  for (let i=6;i>=0;i--) { const dt=new Date(); dt.setDate(dt.getDate()-i); days.push(dt.toISOString().split('T')[0]); dayLabels.push(dt.toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'2-digit'})); }
+  const weekData = days.map(d => {
+    if (!state.students.length) return 0;
+    const done = state.students.filter(s => { const st=state.hwStatus[`${s.id}_${d}`]; return st==='done'||st===undefined; }).length;
+    return Math.round((done/state.students.length)*100);
+  });
+  const ctxW = document.getElementById('chart-week');
+  if (chartWeek) chartWeek.destroy();
+  chartWeek = new Chart(ctxW.getContext('2d'), {
+    type:'line',
+    data:{ labels:dayLabels, datasets:[{ label:'% Klasse', data:weekData, borderColor:'#2ECC71', backgroundColor:'rgba(46,204,113,0.1)', fill:true, tension:0.4, pointBackgroundColor:'#2ECC71' }] },
+    options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%'}}} }
+  });
+}
+
+// ============================================================
+// STUDENT MANAGE
+// ============================================================
+// ============================================================
+// SYSTEMEINSTELLUNGEN
+// ============================================================
+function setToday() {
+  document.getElementById('hw-date').value = today();
+  renderHWCheck();
+}
+
+function populateSettingInputs() {
+  const cb = document.getElementById('setting-class-bonus');
+  const sb = document.getElementById('setting-student-bonus');
+  const bt = document.getElementById('setting-bonus-threshold');
+  if (cb) cb.value = state.classBonus;
+  if (sb) sb.value = state.classStudentBonus !== undefined ? state.classStudentBonus : 0;
+  if (bt) bt.value = state.classBonusThreshold || 90;
+}
+
+async function saveSetting(metaKey, inputId, isNumber) {
+  const val = document.getElementById(inputId).value;
+  let parsed = isNumber ? parseInt(val) : val;
+  if (isNaN(parsed) && isNumber) { showToast('❗ Ungültiger Wert.', 'error'); return; }
+  if (metaKey === 'classBonusThreshold') {
+    if (parsed < 1 || parsed > 100) { showToast('❗ Bitte einen Wert zwischen 1 und 100 eingeben.', 'error'); return; }
+  }
+  await fbUpdate('meta', { [metaKey]: parsed });
+  showToast('✅ Einstellung gespeichert!', 'success');
+}
+
+// ============================================================
+// RANG EDITOR
+// ============================================================
+function renderRankEditor() {
+  const el = document.getElementById('rank-editor');
+  if (!el) return;
+  el.innerHTML = '';
+  RANKS.forEach((r, i) => {
+    const badgeStyle = r.color
+      ? `background:${r.color};color:${isLight(r.color)?'#1B2D4F':'white'}`
+      : '';
+    const badgeCls = r.color ? 'rank-custom' : r.cls;
+    el.innerHTML += `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;background:var(--bg);padding:10px;border-radius:10px;border:1px solid var(--border);">
+        <span class="rank-badge ${badgeCls}" style="min-width:80px;justify-content:center;${badgeStyle}">${r.icon} ${r.name}</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1;">
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Name</div>
+            <input type="text" class="form-input" id="rank-name-${i}" value="${r.name}" style="width:90px;padding:6px 10px;"
+              oninput="previewRank(${i})">
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Emoji</div>
+            <input type="text" class="form-input" id="rank-icon-${i}" value="${r.icon}" style="width:55px;padding:6px 10px;" maxlength="4"
+              oninput="previewRank(${i})">
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Ab Punkte</div>
+            <input type="number" class="form-input" id="rank-min-${i}" value="${r.min}" min="0" style="width:80px;padding:6px 10px;" ${i===0?'disabled':''}>
+          </div>
+          <div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">Farbe</div>
+            <div style="display:flex;gap:4px;align-items:center;">
+              <input type="color" id="rank-color-${i}" value="${r.color || rankClsToHex(r.cls)}"
+                style="width:40px;height:34px;border-radius:8px;border:2px solid var(--border);cursor:pointer;padding:2px;"
+                oninput="previewRank(${i})">
+              <button onclick="resetRankColor(${i})" title="Farbe zurücksetzen"
+                style="height:34px;padding:0 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:14px;">↩</button>
+            </div>
+          </div>
+        </div>
+        ${RANKS.length > 1 ? `<button onclick="deleteRank(${i})" title="Rang löschen"
+          style="height:34px;padding:0 10px;border-radius:8px;border:none;background:var(--red);color:white;cursor:pointer;font-size:16px;flex-shrink:0;">🗑</button>` : ''}
+      </div>`;
+  });
+}
+
+function rankClsToHex(cls) {
+  const map = {
+    'rank-holz':'#8B6914','rank-stein':'#6B7A99','rank-kupfer':'#B87333',
+    'rank-bronze':'#CD7F32','rank-silber':'#A8A9AD','rank-gold':'#F5B700','rank-platin':'#C0C0C0'
+  };
+  return map[cls] || '#4A90D9';
+}
+
+function previewRank(i) {
+  const name  = document.getElementById(`rank-name-${i}`).value || '?';
+  const icon  = document.getElementById(`rank-icon-${i}`).value || '⭐';
+  const color = document.getElementById(`rank-color-${i}`).value;
+  const badge = document.querySelector(`#rank-editor > div:nth-child(${i+1}) .rank-badge`);
+  if (badge) {
+    badge.textContent = `${icon} ${name}`;
+    badge.style.background = color;
+    badge.style.color = isLight(color) ? '#1B2D4F' : 'white';
+  }
+}
+
+function resetRankColor(i) {
+  const defaultColor = rankClsToHex(RANKS[i].cls);
+  document.getElementById(`rank-color-${i}`).value = defaultColor;
+  previewRank(i);
+}
+
+function deleteRank(i) {
+  if (RANKS.length <= 1) { showToast('❗ Mindestens ein Rang muss vorhanden sein.', 'error'); return; }
+  if (!confirm(`Rang „${RANKS[i].name}" wirklich löschen?`)) return;
+  RANKS.splice(i, 1);
+  renderRankEditor();
+  showToast('🗑 Rang entfernt — bitte speichern!', 'info');
+}
+
+function addNewRank() {
+  const lastMin = RANKS.length > 0 ? RANKS[RANKS.length-1].min : 0;
+  RANKS.push({
+    name: 'Neuer Rang',
+    icon: '⭐',
+    min: lastMin + 25,
+    max: Infinity,
+    cls: 'rank-custom',
+    color: '#4A90D9'
+  });
+  renderRankEditor();
+  showToast('➕ Neuer Rang hinzugefügt — bitte anpassen und speichern!', 'info');
+  // Scroll zum neuen Rang
+  const editor = document.getElementById('rank-editor');
+  if (editor) editor.lastElementChild?.scrollIntoView({ behavior:'smooth', block:'center' });
+}
+
+async function saveRanks() {
+  const newRanks = RANKS.map((r, i) => {
+    const name  = document.getElementById(`rank-name-${i}`)?.value.trim() || r.name;
+    const icon  = document.getElementById(`rank-icon-${i}`)?.value.trim() || r.icon;
+    const min   = i === 0 ? 0 : (parseInt(document.getElementById(`rank-min-${i}`)?.value) || r.min);
+    const color = document.getElementById(`rank-color-${i}`)?.value || r.color || null;
+    const defaultColor = rankClsToHex(r.cls);
+    return {
+      name, icon, min,
+      cls: r.cls || 'rank-custom',
+      color: color !== defaultColor ? color : null,
+    };
+  });
+  newRanks.sort((a,b) => a.min - b.min);
+
+  // Max-Werte berechnen — Infinity NICHT speichern (Firebase unterstützt es nicht)
+  // Stattdessen max weglassen; beim Laden wird der letzte Rang als unbegrenzt behandelt
+  const toSave = newRanks.map((r, i) => {
+    const obj = { name: r.name, icon: r.icon, min: r.min, cls: r.cls };
+    if (r.color) obj.color = r.color;
+    // max nur speichern wenn nicht der letzte Rang
+    if (i < newRanks.length - 1) obj.max = newRanks[i+1].min - 1;
+    return obj;
+  });
+
+  // Lokales RANKS Array mit Infinity für letzten Rang aktualisieren
+  RANKS = newRanks.map((r, i) => ({
+    ...r,
+    max: i < newRanks.length - 1 ? newRanks[i+1].min - 1 : Infinity,
+  }));
+
+  await fbUpdate('meta', { ranks: toSave });
+  renderRankEditor();
+  showToast('✅ Ränge gespeichert!', 'success');
+}
+
+function renderStudentManage() {
+  const list = document.getElementById('student-manage-list');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!state.students.length) { list.innerHTML='<div class="text-muted">Noch keine Schüler angelegt.</div>'; return; }
+
+  // Sortierung
+  const sortEl = document.getElementById('student-sort');
+  const sort = sortEl ? sortEl.value : 'last-az';
+  const sorted = [...state.students].sort((a, b) => {
+    switch (sort) {
+      case 'last-az':    return (a.last||'').localeCompare(b.last||'', 'de');
+      case 'first-az':   return (a.first||'').localeCompare(b.first||'', 'de');
+      case 'points-desc': return (b.points||0) - (a.points||0);
+      case 'points-asc':  return (a.points||0) - (b.points||0);
+      case 'streak-desc': return (b.streak||0) - (a.streak||0);
+      case 'streak-asc':  return (a.streak||0) - (b.streak||0);
+      default: return 0;
+    }
+  });
+
+  sorted.forEach(s => {
+    list.innerHTML += `<div class="log-entry" style="flex-wrap:wrap;gap:8px;">
+      <div style="flex:1;min-width:120px;">
+        <div style="font-weight:700;">${s.first} ${s.last}</div>
+        <div style="font-size:11px;color:var(--text-muted);">📧 ${s.email || s.username || '—'}</div>
+        <div style="font-size:11px;margin-top:2px;">${getRankBadgeHTML(displayRankValue(s))} ${s.points||0} ⭐ | 🔥${s.streak||0}</div>
+        <div style="font-size:11px;margin-top:2px;color:var(--text-muted);">📚 HA abgegeben: <b style='color:#2ECC71'>${Object.entries(state.hwStatus).filter(([k,v])=>k.startsWith(s.id+'_')&&v==='done').length}</b> &nbsp;❌ gefehlt: <b style='color:#E74C3C'>${Object.entries(state.hwStatus).filter(([k,v])=>k.startsWith(s.id+'_')&&v==='missing').length}</b></div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn btn-green btn-sm" onclick="openAdjustModal('${s.id}',1)">+ Punkte</button>
+        <button class="btn btn-danger btn-sm" onclick="openAdjustModal('${s.id}',-1)">− Punkte</button>
+        <button class="btn btn-ghost btn-sm" onclick="removeStudent('${s.id}')">🗑</button>
+      </div>
+    </div>`;
+  });
+}
+
+let adjustTargetId=null, adjustDirection=1;
+function openAdjustModal(id, dir) {
+  adjustTargetId=id; adjustDirection=dir;
+  const s=state.students.find(x=>x.id===id);
+  document.getElementById('adjust-modal-title').textContent = dir>0?`➕ Punkte hinzufügen – ${s.first} ${s.last}`:`➖ Punkte abziehen – ${s.first} ${s.last}`;
+  document.getElementById('adjust-points-val').value='';
+  document.getElementById('adjust-points-reason').value='';
+  document.getElementById('adjust-streak-val').value='';
+  document.getElementById('adjust-streak-val').placeholder = `leer lassen = unverändert (aktuell: ${s.streak||0})`;
+  const rankSel = document.getElementById('adjust-rank-val');
+  const currentRank = getRank(displayRankValue(s));
+  rankSel.innerHTML = '<option value="">— nicht ändern —</option>' +
+    RANKS.map((r,i)=>`<option value="${i}"${r.name===currentRank.name?' selected':''}>${r.icon} ${r.name}</option>`).join('');
+  rankSel.value = ''; // Standard: nichts ändern, auch wenn oben der aktuelle Rang markiert ist
+  document.getElementById('adjust-confirm-btn').onclick = doAdjustPoints;
+  openModal('modal-adjust-points');
+}
+async function doAdjustPoints() {
+  const s=state.students.find(x=>x.id===adjustTargetId);
+  if (!s) return;
+
+  const valRaw = document.getElementById('adjust-points-val').value;
+  const reason = document.getElementById('adjust-points-reason').value.trim()||'Manuelle Anpassung durch Lehrer';
+  const streakRaw = document.getElementById('adjust-streak-val').value;
+  const rankSelVal = document.getElementById('adjust-rank-val').value;
+
+  const updates = {};
+  const msgs = [];
+
+  if (valRaw !== '') {
+    const val = parseInt(valRaw);
+    if (!val || val < 1) { showToast('❗ Bitte eine gültige Punktzahl eingeben (oder leer lassen).','error'); return; }
+    const delta = adjustDirection*val;
+    const newPoints = Math.max(0,(s.points||0)+delta);
+    updates.points = newPoints;
+    updates.rankPoints = nextRankPoints(s, newPoints);
+    updates.log = [{ type:'manual', pts:delta, text:reason, date:today() }, ...(s.log||[])];
+    msgs.push(`${delta>0?'+':''}${delta} Punkte`);
+  }
+
+  if (streakRaw !== '') {
+    updates.streak = Math.max(0, parseInt(streakRaw)||0);
+    msgs.push(`🔥 Streak: ${updates.streak}`);
+  }
+
+  if (rankSelVal !== '') {
+    const chosen = RANKS[parseInt(rankSelVal)];
+    if (chosen) {
+      updates.rankPoints = chosen.min; // gezielte Rang-Festlegung überschreibt den automatischen Wert bewusst
+      msgs.push(`🏅 Rang: ${chosen.icon} ${chosen.name}`);
+    }
+  }
+
+  if (!Object.keys(updates).length) { showToast('❗ Bitte mindestens ein Feld ausfüllen.','error'); return; }
+
+  await fbUpdate(`students/${adjustTargetId}`, updates);
+  showToast(`✅ ${s.first}: ${msgs.join(', ')}`,'info');
+  closeModal('modal-adjust-points');
+}
+async function changeTeacherPassword() {
+  const pw1  = document.getElementById('new-teacher-pw').value;
+  const pw2  = document.getElementById('new-teacher-pw2').value;
+  const hint = document.getElementById('pw-change-hint');
+  if (!pw1 || pw1.length < 6) { showToast('❗ Passwort mind. 6 Zeichen.', 'error'); return; }
+  if (pw1 !== pw2) { showToast('❗ Passwörter stimmen nicht überein.', 'error'); return; }
+  try {
+    await fb().updatePassword(fb().auth.currentUser, pw1);
+    document.getElementById('new-teacher-pw').value = '';
+    document.getElementById('new-teacher-pw2').value = '';
+    const role = state.currentUser.role;
+    if (hint) hint.textContent = `✅ Passwort für ${role === 'admin' ? 'Administrator' : 'Lehrer'} erfolgreich geändert.`;
+    showToast('✅ Passwort geändert!', 'success');
+  } catch(e) {
+    showToast(e.code==='auth/requires-recent-login'?'❗ Bitte neu einloggen und dann Passwort ändern.':`❗ ${e.message}`,'error');
+  }
+}
+async function removeStudent(id) {
+  if (!confirm('Schüler wirklich entfernen?')) return;
+  const st = state.students.find(x=>x.id===id);
+  await fbRemove(`students/${id}`);
+  if (st && st.uid) { try { await gRemove(`studentIndex/${st.uid}`); } catch(e) { console.error(e); } }
+  showToast('🗑 Schüler entfernt','info');
+}
+
+// ============================================================
+// REWARDS MANAGE
+// ============================================================
+function renderRewardManage() {
+  const list=document.getElementById('reward-manage-list');
+  if (!list) return;
+  list.innerHTML='';
+  if (!state.rewards.length) { list.innerHTML='<div class="text-muted">Noch keine Belohnungen.</div>'; return; }
+  state.rewards.forEach(r => {
+    list.innerHTML += `<div class="log-entry">
+      <span class="log-icon">${r.icon}</span>
+      <div class="log-text"><b>${r.name}</b> — ${r.desc}<br><span style="font-size:11px;color:var(--text-muted)">${r.type==='class'?'🏫 Klassenmeilenstein':'👤 Einzelbelohnung'}</span></div>
+      <span class="log-pts positive">${r.cost} ⭐</span>
+      <button class="btn btn-secondary btn-sm" onclick="openEditRewardModal('${r.id}')">✏️</button>
+      <button class="btn btn-danger btn-sm" onclick="removeReward('${r.id}')">🗑</button>
+    </div>`;
+  });
+}
+async function removeReward(id) { await fbRemove(`rewards/${id}`); showToast('🗑 Belohnung entfernt','info'); }
+
+// ============================================================
+// MILESTONE PATH
+// ============================================================
+function renderMilestonePath(containerId, isTeacher) {
+  const container=document.getElementById(containerId);
+  if (!container) return;
+  const classRewards=state.rewards.filter(r=>r.type==='class').sort((a,b)=>a.cost-b.cost);
+  Array.from(container.children).forEach(c=>{ if(!c.classList.contains('milestone-connector')) c.remove(); });
+  if (!classRewards.length) { container.innerHTML+='<div class="text-muted" style="padding-left:80px;">Noch keine Klassenbelohnungen angelegt.</div>'; return; }
+  classRewards.forEach((r,i) => {
+    const reached=state.classPointsTotal>=r.cost;
+    const redeemed=r.redeemed;
+    let cc=''; if(redeemed)cc='redeemed'; else if(reached)cc='reached'; else if(i===classRewards.findIndex(x=>!x.redeemed&&state.classPointsTotal<x.cost))cc='next';
+    const item=document.createElement('div');
+    item.className='milestone-item';
+    item.innerHTML=`<div class="milestone-circle ${cc}">${r.icon}</div>
+      <div class="milestone-info">
+        <div class="milestone-name">${r.name}</div>
+        <div class="milestone-desc">${r.desc}</div>
+        <div class="milestone-cost">🏫 ${r.cost} Klassenpunkte</div>
+        <div class="milestone-status">${redeemed?'<span style="color:var(--gold)">✅ Eingelöst</span>':reached?'<span style="color:var(--green)">🎉 Erreichbar!</span>':`<span style="color:var(--text-muted)">Noch ${r.cost-state.classPointsTotal} Punkte fehlen</span>`}</div>
+        ${isTeacher&&reached&&!redeemed?`<button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="redeemMilestone('${r.id}')">🎉 Einlösen</button>`:''}
+      </div>`;
+    container.appendChild(item);
+  });
+}
+async function redeemMilestone(id) {
+  const r=state.rewards.find(x=>x.id===id);
+  if(!r||state.classPointsTotal<r.cost) return;
+  await fbUpdate(`rewards/${id}`,{redeemed:true});
+  showToast(`🎉 Klassenbelohnung eingelöst: ${r.icon} ${r.name}`,'success');
+}
+
+// ============================================================
+// REDEEM LOG
+// ============================================================
+function renderRedeemLog() {
+  const el = document.getElementById('redeem-log-list');
+  if (!el) return;
+  if (!state.redeemLog.length) {
+    el.innerHTML = '<div class="text-muted">Noch keine Belohnungen eingelöst.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  state.redeemLog.slice(0, 50).forEach(entry => {
+    const checked  = entry.checked;
+    const id       = entry._id;
+    const rowStyle = checked
+      ? 'background:#F0FFF6;border-color:#2ECC71;opacity:0.75;'
+      : '';
+    const checkIcon = checked ? '✅' : '☐';
+    const checkTitle = checked ? 'Als ausstehend markieren' : 'Als ausgehändigt abhaken';
+
+    el.innerHTML += `
+      <div class="redeem-log-item" style="${rowStyle}">
+        <span style="font-size:20px;">${entry.rewardIcon || '🎁'}</span>
+        <div style="flex:1;min-width:0;">
+          <b>${entry.studentName}</b> — <b>${entry.rewardName}</b>
+          ${checked ? '<span style="font-size:11px;color:#2ECC71;font-weight:700;margin-left:4px;">✓ Ausgehändigt</span>' : ''}
+          <div style="font-size:11px;color:var(--text-muted);">${formatDate(entry.date)}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <button title="${checkTitle}"
+            onclick="toggleRedeemCheck('${id}', ${!checked})"
+            style="height:32px;padding:0 10px;border-radius:8px;border:none;cursor:pointer;font-size:14px;font-weight:700;
+              background:${checked ? '#E8F8EF' : '#2ECC71'};color:${checked ? '#2ECC71' : 'white'};">
+            ${checkIcon}
+          </button>
+          <button title="Eintrag löschen"
+            onclick="deleteRedeemEntry('${id}')"
+            style="height:32px;padding:0 10px;border-radius:8px;border:none;cursor:pointer;font-size:14px;
+              background:#FFF0F0;color:#E74C3C;">
+            🗑
+          </button>
+        </div>
+      </div>`;
+  });
+}
+
+async function toggleRedeemCheck(id, checked) {
+  await fbUpdate(`redeemLog/${id}`, { checked });
+  showToast(checked ? '✅ Als ausgehändigt markiert!' : '↩ Markierung entfernt', checked ? 'success' : 'info');
+}
+
+async function deleteRedeemEntry(id) {
+  if (!confirm('Eintrag wirklich löschen?')) return;
+  await fbRemove(`redeemLog/${id}`);
+  showToast('🗑 Eintrag gelöscht', 'info');
+}
+
+// ============================================================
+// ADD STUDENT / REWARD
+// ============================================================
+function openAddStudentModal() {
+  ['new-student-first','new-student-last','new-student-email','new-student-password'].forEach(id=>document.getElementById(id).value='');
+  openModal('modal-add-student');
+}
+async function addStudent() {
+  const first    = document.getElementById('new-student-first').value.trim();
+  const last     = document.getElementById('new-student-last').value.trim();
+  const email    = document.getElementById('new-student-email').value.trim().toLowerCase();
+  const password = document.getElementById('new-student-password').value.trim();
+  if (!state.classId) { showToast('❗ Bitte zuerst eine Klasse auswählen.','error'); return; }
+  if (!first||!last||!email||!password) { showToast('❗ Bitte alle Felder ausfüllen.','error'); return; }
+  if (password.length < 6) { showToast('❗ Passwort mind. 6 Zeichen.','error'); return; }
+  if (state.students.find(s=>s.email===email)) { showToast('❗ E-Mail bereits vergeben.','error'); return; }
+  showToast('⏳ Schüler wird angelegt…', 'info');
+  try {
+    // Account über den zweiten Firebase-Kontext anlegen → Lehrer/Admin bleibt eingeloggt
+    const uid = await fb().createAccount(email, password);
+    const newRef = fb().push(cref('students'));
+    const studentId = newRef.key;
+    await fb().set(newRef, { first, last, email, uid, points:0, rankPoints:0, streak:0, log:[] });
+    // Index, damit sich der Schüler nach dem Login einer Klasse zuordnen lässt
+    await gSet(`studentIndex/${uid}`, { classId: state.classId, studentId, name: `${first} ${last}` });
+    closeModal('modal-add-student');
+    showToast(`👤 ${first} ${last} angelegt!`, 'success');
+  } catch(e) {
+    showToast(e.code==='auth/email-already-in-use'
+      ? '❗ E-Mail bereits vergeben (evtl. früher gelöscht – dann Account in der Firebase-Konsole unter Authentication löschen).'
+      : `❗ ${e.message}`,'error');
+  }
+}
+
+let editRewardId = null;
+
+function openAddRewardModal() {
+  editRewardId = null;
+  document.getElementById('reward-modal-title').textContent = '🎁 Neue Belohnung';
+  document.getElementById('reward-save-btn').textContent = 'Hinzufügen';
+  ['new-reward-name','new-reward-desc','new-reward-icon','new-reward-cost'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('new-reward-type').value = 'individual';
+  openModal('modal-add-reward');
+}
+
+function openEditRewardModal(id) {
+  const r = state.rewards.find(x=>x.id===id);
+  if (!r) return;
+  editRewardId = id;
+  document.getElementById('reward-modal-title').textContent = '✏️ Belohnung bearbeiten';
+  document.getElementById('reward-save-btn').textContent = 'Speichern';
+  document.getElementById('new-reward-name').value = r.name||'';
+  document.getElementById('new-reward-desc').value = r.desc||'';
+  document.getElementById('new-reward-icon').value = r.icon||'';
+  document.getElementById('new-reward-cost').value = r.cost||'';
+  document.getElementById('new-reward-type').value = r.type||'individual';
+  openModal('modal-add-reward');
+}
+
+async function saveReward() {
+  const name=document.getElementById('new-reward-name').value.trim();
+  const desc=document.getElementById('new-reward-desc').value.trim();
+  const icon=document.getElementById('new-reward-icon').value.trim()||'🎁';
+  const cost=parseInt(document.getElementById('new-reward-cost').value);
+  const type=document.getElementById('new-reward-type').value;
+  if(!name||!cost||cost<1) { showToast('❗ Bitte Name und Kosten angeben.','error'); return; }
+
+  if (editRewardId) {
+    await fbUpdate(`rewards/${editRewardId}`, { name, desc, icon, cost, type });
+    closeModal('modal-add-reward');
+    showToast(`✏️ Belohnung "${name}" aktualisiert!`,'success');
+    editRewardId = null;
+    return;
+  }
+
+  const newRef=fb().push(cref('rewards'));
+  await fb().set(newRef,{ name, desc, icon, cost, type, redeemed:false });
+  closeModal('modal-add-reward');
+  showToast(`🎁 Belohnung "${name}" hinzugefügt!`,'success');
+}
+
+// ============================================================
+// STUDENT VIEW
+// ============================================================
+function renderStudentView() {
+  applyStudentTheme();
+  const sid=state.currentUser?.studentId;
+  const s=state.students.find(x=>x.id===sid);
+  if(!s) return;
+
+  const sorted=[...state.students].sort((a,b)=>(b.points||0)-(a.points||0));
+  const pos=sorted.findIndex(x=>x.id===sid)+1;
+  const avg=state.students.length>0?Math.round(state.students.reduce((sum,x)=>sum+(x.points||0),0)/state.students.length):0;
+  const maxPts=Math.max(...state.students.map(x=>x.points||0),avg,1);
+  const rank=getRank(displayRankValue(s));
+  const nextRank=RANKS.find(r=>r.min>(s.points||0));
+
+  document.getElementById('sp-name').textContent=`${s.first} ${s.last}`;
+  document.getElementById('sp-rank-badge').innerHTML=getRankBadgeHTML(displayRankValue(s));
+  document.getElementById('sp-points').textContent=s.points||0;
+  document.getElementById('sp-streak').textContent=`${s.streak||0} 🔥`;
+  document.getElementById('sp-avg').textContent=`${avg} ⭐`;
+  document.getElementById('sp-pos').textContent=`Platz ${pos} von ${state.students.length}`;
+
+  if(nextRank) {
+    const pct=Math.min(100,(((s.points||0)-rank.min)/(nextRank.min-rank.min))*100);
+    document.getElementById('sp-rank-progress').style.width=pct+'%';
+    document.getElementById('sp-rank-pct').textContent=pct.toFixed(0)+'%';
+    document.getElementById('sp-next-rank-text').textContent=`Noch ${nextRank.min-(s.points||0)} Punkte bis ${nextRank.icon} ${nextRank.name}`;
+  } else {
+    document.getElementById('sp-rank-progress').style.width='100%';
+    document.getElementById('sp-rank-pct').textContent='100%';
+    document.getElementById('sp-next-rank-text').textContent='🏆 Höchster Rang erreicht!';
+  }
+
+  document.getElementById('sp-compare-mine').style.width=(((s.points||0)/maxPts)*100)+'%';
+  document.getElementById('sp-compare-avg').style.width=((avg/maxPts)*100)+'%';
+  document.getElementById('sp-compare-mine-val').textContent=s.points||0;
+  document.getElementById('sp-compare-avg-val').textContent=avg;
+  const diff=(s.points||0)-avg;
+  document.getElementById('sp-compare-msg').textContent=diff>0?`🌟 Du liegst ${diff} Punkt${diff!==1?'e':''} über dem Klassendurchschnitt – weiter so!`:diff<0?`📈 Du liegst ${Math.abs(diff)} Punkt${Math.abs(diff)!==1?'e':''} unter dem Klassendurchschnitt – du schaffst das!`:`👏 Du bist genau auf dem Klassendurchschnitt!`;
+
+  const logEl=document.getElementById('sp-log');
+  if (logEl) {
+    logEl.innerHTML='';
+    const log=s.log||[];
+    if(!log.length) logEl.innerHTML='<div class="text-muted">Noch keine Aktivitäten.</div>';
+    else log.slice(0,8).forEach(l=>{ logEl.innerHTML+=`<div class="log-entry"><span class="log-icon">${l.pts>0?'⬆️':'⬇️'}</span><div class="log-text">${l.text}</div><span class="log-pts ${l.pts>0?'positive':'negative'}">${l.pts>0?'+':''}${l.pts}</span><span class="log-date">${formatDate(l.date)}</span></div>`; });
+  }
+
+  const rg=document.getElementById('sp-reward-grid');
+  if (rg) {
+    rg.innerHTML='';
+    state.rewards.filter(r=>r.type==='individual').forEach(r=>{
+      const canAfford=(s.points||0)>=r.cost;
+      rg.innerHTML+=`<div class="reward-card" style="${!canAfford?'opacity:0.55':''}"><div class="reward-icon">${r.icon}</div><div class="reward-name">${r.name}</div><div class="reward-desc">${r.desc}</div><div class="reward-cost">${r.cost} ⭐</div><button class="btn btn-secondary btn-sm" style="width:100%;margin-top:10px;" ${!canAfford?'disabled':''} onclick="redeemStudentReward('${sid}','${r.id}')">${canAfford?'🎁 Einlösen':`Noch ${r.cost-(s.points||0)} fehlen`}</button></div>`;
+    });
+    if(!state.rewards.filter(r=>r.type==='individual').length) {
+      rg.innerHTML='<div class="text-muted">Noch keine Belohnungen verfügbar.</div>';
+    }
+  }
+
+  renderMilestonePath('sp-milestone-path',false);
+  const scp=document.getElementById('sp-class-pts');
+  if(scp) scp.textContent=state.classPointsTotal;
+}
+
+async function redeemStudentReward(studentId, rewardId) {
+  const s=state.students.find(x=>x.id===studentId);
+  const r=state.rewards.find(x=>x.id===rewardId);
+  if(!s||!r||(s.points||0)<r.cost) return;
+  const log=[{ type:'redeem', pts:-r.cost, text:`${r.icon} Belohnung: ${r.name}`, date:today() }, ...(s.log||[])];
+  const updates={};
+  updates[`students/${studentId}/points`]=(s.points||0)-r.cost;
+  updates[`students/${studentId}/rankPoints`]=nextRankPoints(s, s.points||0); // Rang bleibt beim Ausgeben erhalten
+  updates[`students/${studentId}/log`]=log;
+  await fbUpdateRoot(updates);
+  const logRef=fb().push(cref('redeemLog'));
+  await fb().set(logRef,{ studentName:`${s.first} ${s.last}`, rewardName:r.name, rewardIcon:r.icon, date:today() });
+  showToast(`🎁 "${r.icon} ${r.name}" eingelöst!`,'success');
+}
+
+// ============================================================
+// MOTIVATION (KI via Anthropic API)
+// ============================================================
+// 15 Mutmachsprüche — werden zufällig ausgewählt
+const MOTIVATIONS = [
+  "Du bist auf dem richtigen Weg! Jede Hausaufgabe die du erledigst bringt dich einen Schritt weiter — und du wirst merken, wie stolz du danach bist. Mach weiter so! 💪",
+  "Kleine Schritte führen zu großen Zielen. Auch wenn es manchmal schwer fällt: Du schaffst das, und deine Mühe wird sich auszahlen. Heute ist ein guter Tag um durchzuhalten! ⭐",
+  "Weißt du was das Coolste ist? Jede Hausaufgabe die du machst zeigt, dass du es ernst nimmst — und das merken deine Lehrer, deine Mitschüler und vor allem du selbst! 🚀",
+  "Erfolg ist kein Zufall — er entsteht durch Einsatz und Ausdauer, genau wie deiner! Du bist auf einem tollen Weg, also bleib dran und gib heute wieder alles! 🌟",
+  "Stell dir vor, wie gut du dich nach der erledigten Hausaufgabe fühlst. Dieses Gefühl ist es wert! Du hast alles was du brauchst — fang jetzt an! ✅",
+  "Dein Streak zeigt, dass du wirklich dranbleibst — das ist keine Selbstverständlichkeit! Mach heute so weiter wie bisher, du machst das fantastisch! 🔥",
+  "Jeder Tag mit erledigten Hausaufgaben ist ein Baustein für deine Zukunft. Du legst das Fundament — Stein für Stein. Weiter so, du schaffst das! 🏗️",
+  "Manchmal braucht man einfach einen kleinen Schubs. Hier ist er: Du bist clever, du bist fähig, und diese Hausaufgabe ist kein Problem für dich! Los geht's! 💡",
+  "Die besten Schüler sind nicht die ohne Schwierigkeiten — sondern die, die trotz Schwierigkeiten weitermachen. Genau das machst du! Sei stolz auf dich! 🎯",
+  "Deine Mühe von heute ist der Erfolg von morgen. Jede Hausaufgabe die du heute erledigst macht dich morgen sicherer und stärker. Du machst das super! 📚",
+  "Wusstest du, dass regelmäßiges Lernen das Gehirn buchstäblich wachsen lässt? Du investierst gerade in dich selbst — und das ist die beste Investition überhaupt! 🧠",
+  "Auch Profis hatten mal Hausaufgaben — und sie haben sie gemacht. Du bist auf dem gleichen Weg wie alle Erfolgreichen. Mach heute den nächsten Schritt! 🏆",
+  "Du hast schon so viel geschafft bis hierhin. Lass nicht nach jetzt, wo du schon so weit gekommen bist! Heute wieder alles geben — du kannst das! 💫",
+  "Ein kleiner Tipp von mir: Fang einfach an. Nicht perfekt, nicht komplett — einfach anfangen. Der Rest kommt von selbst. Du schaffst das! ✨",
+  "Deine Klassenkameraden zählen auf dich, deine Eltern sind stolz auf dich, und ich bin überzeugt: Du gibst heute wieder dein Bestes. Weiter so! 🌈",
+];
+
+function loadMotivation() {
+  const el = document.getElementById('motiv-quote');
+  if (!el) return;
+
+  const sid   = state.currentUser?.studentId;
+  const s     = sid ? state.students.find(x => x.id === sid) : null;
+  const name  = s ? s.first : '';
+  const streak = s ? (s.streak || 0) : 0;
+
+  // Zufälligen Spruch wählen (anderen als den aktuellen)
+  const current = el.textContent;
+  let spruch;
+  do {
+    spruch = MOTIVATIONS[Math.floor(Math.random() * MOTIVATIONS.length)];
+  } while (spruch === current && MOTIVATIONS.length > 1);
+
+  // Spruch personalisieren: Name + Streak einbauen wenn verfügbar
+  if (name) {
+    // Ersten Satz mit Namen beginnen wenn kein Name drin ist
+    if (!spruch.includes(name)) {
+      spruch = `${name}, ` + spruch.charAt(0).toLowerCase() + spruch.slice(1);
+    }
+  }
+  if (streak >= 5) {
+    spruch += ` Dein ${streak}-Tage-Streak spricht für sich — das ist beeindruckend! 🔥`;
+  }
+
+  el.textContent = spruch;
+}
+
+// ============================================================
+// SCHÜLER-DARSTELLUNG (Hintergrund/Overlay-Farbe + Dark Mode)
+// Hintergrundfarbe -> gesamte Seite (#app) + Header (oberer Rand)
+// Overlay-Farbe    -> alle Kästen in der Schüleransicht
+//                      (.card, .profile-hero, .motiv-box)
+// Im Dark Mode werden eigene Farben deaktiviert und durch ein
+// vordefiniertes dunkles Farbschema ersetzt.
+// ============================================================
+const DARK_PRESET_BG = '#12161F';
+const DARK_PRESET_OVERLAY = '#1C2230';
+const DARK_PRESET_TEXT = '#EAEDF5';
+
+function hex2rgb(hex) {
+  hex = (hex||'').replace('#','');
+  if (hex.length===3) hex = hex.split('').map(c=>c+c).join('');
+  const num = parseInt(hex,16)||0;
+  return { r:(num>>16)&255, g:(num>>8)&255, b:num&255 };
+}
+function rgb2hex(r,g,b) {
+  const clamp = v => Math.max(0,Math.min(255, parseInt(v)||0));
+  return '#' + [r,g,b].map(v=>clamp(v).toString(16).padStart(2,'0')).join('').toUpperCase();
+}
+function isValidHex(hex) { return /^#[0-9A-Fa-f]{6}$/.test(hex||''); }
+
+function studentThemeKey() {
+  return `sp_theme_${state.currentUser?.studentId||'default'}`;
+}
+
+function setSpColorControls(kind, hex) {
+  const rgb = hex2rgb(hex);
+  const c=document.getElementById(`sp-${kind}-color`), h=document.getElementById(`sp-${kind}-hex`),
+        r=document.getElementById(`sp-${kind}-r`), g=document.getElementById(`sp-${kind}-g`), b=document.getElementById(`sp-${kind}-b`);
+  if(c) c.value=hex; if(h) h.value=hex;
+  if(r) r.value=rgb.r; if(g) g.value=rgb.g; if(b) b.value=rgb.b;
+}
+
+function setThemeControlsDisabled(disabled) {
+  ['bg','overlay','text'].forEach(kind=>{
+    ['color','hex','r','g','b'].forEach(suffix=>{
+      const el = document.getElementById(`sp-${kind}-${suffix}`);
+      if(el) el.disabled = disabled;
+    });
+  });
+}
+
+function applyBgColor(hex) {
+  const appEl = document.getElementById('app');
+  const header = document.querySelector('header');
+  if (appEl) appEl.style.background = hex || '';
+  if (header) header.style.background = hex || '';
+}
+function applyOverlayColor(hex) {
+  document.querySelectorAll('#view-student .card, #view-student .profile-hero, #view-student .motiv-box')
+    .forEach(el=>el.style.background = hex || '');
+}
+function applyTextColor(hex) {
+  const vs = document.getElementById('view-student');
+  if (!vs) return;
+  if (hex) vs.style.setProperty('--sp-text', hex);
+  else vs.style.removeProperty('--sp-text');
+}
+
+function applySpColor(kind, hex) {
+  if(!isValidHex(hex)) return;
+  const appEl = document.getElementById('app');
+  if (appEl && appEl.classList.contains('student-dark-mode')) return; // im Dark Mode nicht editierbar
+  hex = hex.toUpperCase();
+  setSpColorControls(kind, hex);
+  if (kind==='bg') applyBgColor(hex);
+  else if (kind==='overlay') applyOverlayColor(hex);
+  else applyTextColor(hex);
+  saveStudentTheme();
+}
+
+function spColorFromPicker(kind) { applySpColor(kind, document.getElementById(`sp-${kind}-color`).value); }
+function spColorFromHex(kind) {
+  let hex = document.getElementById(`sp-${kind}-hex`).value.trim();
+  if(hex && !hex.startsWith('#')) hex = '#'+hex;
+  if(isValidHex(hex)) applySpColor(kind, hex);
+}
+function spColorFromRgb(kind) {
+  const r=document.getElementById(`sp-${kind}-r`).value, g=document.getElementById(`sp-${kind}-g`).value, b=document.getElementById(`sp-${kind}-b`).value;
+  applySpColor(kind, rgb2hex(r,g,b));
+}
+
+function toggleStudentDark() {
+  const dark = document.getElementById('sp-dark-toggle').checked;
+  let theme = {};
+  try { theme = JSON.parse(localStorage.getItem(studentThemeKey())) || {}; } catch(e) {}
+  theme.dark = dark;
+  try { localStorage.setItem(studentThemeKey(), JSON.stringify(theme)); } catch(e) {}
+  applyStudentTheme();
+}
+
+function saveStudentTheme() {
+  let theme = {};
+  try { theme = JSON.parse(localStorage.getItem(studentThemeKey())) || {}; } catch(e) {}
+  theme.bg = document.getElementById('sp-bg-hex')?.value || null;
+  theme.overlay = document.getElementById('sp-overlay-hex')?.value || null;
+  theme.text = document.getElementById('sp-text-hex')?.value || null;
+  theme.dark = false; // Farbeingaben sind nur außerhalb des Dark Mode möglich
+  try { localStorage.setItem(studentThemeKey(), JSON.stringify(theme)); } catch(e) {}
+}
+
+function applyStudentTheme() {
+  const appEl = document.getElementById('app');
+  if(!appEl) return;
+  let theme = {};
+  try { theme = JSON.parse(localStorage.getItem(studentThemeKey())) || {}; } catch(e) { theme = {}; }
+
+  const dark = !!theme.dark;
+  appEl.classList.toggle('student-dark-mode', dark);
+  const dt = document.getElementById('sp-dark-toggle');
+  if(dt) dt.checked = dark;
+  setThemeControlsDisabled(dark);
+
+  if (dark) {
+    applyBgColor('');
+    applyOverlayColor('');
+    applyTextColor('');
+    setSpColorControls('bg', DARK_PRESET_BG);
+    setSpColorControls('overlay', DARK_PRESET_OVERLAY);
+    setSpColorControls('text', DARK_PRESET_TEXT);
+  } else {
+    const bg = (theme.bg && isValidHex(theme.bg)) ? theme.bg : '#F0F4F8';
+    const overlay = (theme.overlay && isValidHex(theme.overlay)) ? theme.overlay : '#1B2D4F';
+    const text = (theme.text && isValidHex(theme.text)) ? theme.text : '#1B2D4F';
+    applyBgColor(theme.bg && isValidHex(theme.bg) ? theme.bg : '');
+    applyOverlayColor(theme.overlay && isValidHex(theme.overlay) ? theme.overlay : '');
+    applyTextColor(theme.text && isValidHex(theme.text) ? theme.text : '');
+    setSpColorControls('bg', bg);
+    setSpColorControls('overlay', overlay);
+    setSpColorControls('text', text);
+  }
+}
+
+function resetStudentTheme() {
+  try { localStorage.removeItem(studentThemeKey()); } catch(e) {}
+  applyStudentTheme();
+  showToast('🎨 Darstellung zurückgesetzt','info');
+}
+
+function resetGlobalStudentTheming() {
+  const appEl = document.getElementById('app');
+  const header = document.querySelector('header');
+  const vs = document.getElementById('view-student');
+  if (appEl) { appEl.classList.remove('student-dark-mode'); appEl.style.background=''; }
+  if (header) header.style.background='';
+  if (vs) vs.style.removeProperty('--sp-text');
+  document.querySelectorAll('.card, .profile-hero, .motiv-box').forEach(el=>el.style.background='');
+}
+
+
+// ============================================================
+// ADMIN: KLASSEN & LEHRKRÄFTE
+// ============================================================
+let editTeacherId = null;
+
+function renderAdminPanel() {
+  if (!state.currentUser || state.currentUser.role !== 'admin') return;
+  const cl = document.getElementById('admin-class-list');
+  const tl = document.getElementById('admin-teacher-list');
+  if (!cl || !tl) return;
+
+  const classes = sortedByName(state.allClasses);
+  cl.innerHTML = classes.length ? classes.map(c => {
+    const teachers = state.teachers.filter(t => t.classes && t.classes[c.id]).map(t => t.name).join(', ');
+    return `<div class="log-entry">
+      <span class="log-icon">🏫</span>
+      <div class="log-text"><b>${escapeHtml(c.name)}</b><br><span style="font-size:11px;color:var(--text-muted)">${teachers ? '👩‍🏫 ' + escapeHtml(teachers) : 'Keine Lehrkraft zugewiesen'}</span></div>
+      <button class="btn btn-secondary btn-sm" onclick="renameClass('${c.id}')" title="Umbenennen">✏️</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteClass('${c.id}')" title="Klasse löschen">🗑</button>
+    </div>`;
+  }).join('') : '<div class="text-muted">Noch keine Klassen.</div>';
+
+  const teachers = sortedByName(state.teachers.map(t => ({ ...t, name: t.name || t.email || t.id })));
+  tl.innerHTML = teachers.length ? teachers.map(t => {
+    const names = Object.keys(t.classes || {}).map(id => (state.allClasses.find(c => c.id === id) || {}).name).filter(Boolean).join(', ');
+    return `<div class="log-entry">
+      <span class="log-icon">👩‍🏫</span>
+      <div class="log-text"><b>${escapeHtml(t.name)}</b><br><span style="font-size:11px;color:var(--text-muted)">${escapeHtml(t.email || '')}<br>${names ? '🏫 ' + escapeHtml(names) : 'Keine Klasse zugewiesen'}</span></div>
+      <button class="btn btn-secondary btn-sm" onclick="openTeacherModal('${t.id}')" title="Klassen zuweisen">🏫</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteTeacher('${t.id}')" title="Lehrkraft entfernen">🗑</button>
+    </div>`;
+  }).join('') : '<div class="text-muted">Noch keine Lehrkräfte.</div>';
+}
+
+async function createClass() {
+  const inp = document.getElementById('new-class-name');
+  const name = inp.value.trim();
+  if (!name) { showToast('❗ Bitte einen Klassennamen eingeben.', 'error'); return; }
+  if (state.allClasses.some(c => c.name.toLowerCase() === name.toLowerCase())) { showToast('❗ Diese Klasse gibt es schon.', 'error'); return; }
+  try {
+    const r = fb().push(gref('classes'));
+    await fb().set(r, { name });
+    inp.value = '';
+    showToast(`🏫 Klasse „${name}“ angelegt`, 'success');
+  } catch(e) { showToast('❗ ' + e.message, 'error'); }
+}
+
+async function renameClass(id) {
+  const c = state.allClasses.find(x => x.id === id);
+  if (!c) return;
+  const name = (prompt('Neuer Name der Klasse:', c.name) || '').trim();
+  if (!name || name === c.name) return;
+  try { await gUpdate('classes/' + id, { name }); showToast('✏️ Klasse umbenannt', 'success'); }
+  catch(e) { showToast('❗ ' + e.message, 'error'); }
+}
+
+async function deleteClass(id) {
+  const c = state.allClasses.find(x => x.id === id);
+  if (!c) return;
+  if (!confirm(`Klasse „${c.name}“ mit ALLEN Schülern, Punkten und Belohnungen endgültig löschen?`)) return;
+  if (!confirm('Wirklich sicher? Das kann nicht rückgängig gemacht werden.')) return;
+  try {
+    // Schüler-Indexeinträge der Klasse entfernen
+    const snap = await fb().get(gref(`classData/${id}/students`));
+    const studs = snap.val() || {};
+    for (const st of Object.values(studs)) { if (st && st.uid) await gRemove('studentIndex/' + st.uid); }
+    // Zuweisungen bei Lehrkräften entfernen
+    for (const t of state.teachers) { if (t.classes && t.classes[id]) await gRemove(`teachers/${t.id}/classes/${id}`); }
+    await gRemove('classData/' + id);
+    await gRemove('classes/' + id);
+    showToast('🗑 Klasse gelöscht (Schüler-Accounts ggf. in der Firebase-Konsole entfernen)', 'info');
+  } catch(e) { showToast('❗ ' + e.message, 'error'); }
+}
+
+function openTeacherModal(teacherId) {
+  editTeacherId = teacherId || null;
+  const t = teacherId ? state.teachers.find(x => x.id === teacherId) : null;
+  document.getElementById('teacher-modal-title').textContent = t ? `🏫 Klassen zuweisen – ${t.name || t.email}` : '👩‍🏫 Lehrkraft anlegen';
+  document.getElementById('teacher-save-btn').textContent = t ? 'Speichern' : 'Anlegen';
+  document.getElementById('teacher-create-fields').style.display = t ? 'none' : '';
+  ['new-teacher-name','new-teacher-email','new-teacher-password'].forEach(id => document.getElementById(id).value = '');
+  const checks = document.getElementById('teacher-class-checks');
+  const classes = sortedByName(state.allClasses);
+  checks.innerHTML = classes.length ? classes.map(c => {
+    const on = t && t.classes && t.classes[c.id];
+    return `<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" class="teacher-class-check" value="${c.id}"${on ? ' checked' : ''}> ${escapeHtml(c.name)}</label>`;
+  }).join('') : '<div class="text-muted">Lege zuerst eine Klasse an.</div>';
+  openModal('modal-teacher');
+}
+
+async function saveTeacher() {
+  const classMap = {};
+  document.querySelectorAll('.teacher-class-check:checked').forEach(cb => { classMap[cb.value] = true; });
+
+  // Bestehende Lehrkraft: nur Klassen neu zuweisen
+  if (editTeacherId) {
+    try {
+      await gSet(`teachers/${editTeacherId}/classes`, Object.keys(classMap).length ? classMap : null);
+      closeModal('modal-teacher');
+      showToast('✅ Klassen zugewiesen', 'success');
+    } catch(e) { showToast('❗ ' + e.message, 'error'); }
+    return;
+  }
+
+  // Neue Lehrkraft
+  const name = document.getElementById('new-teacher-name').value.trim();
+  const email = document.getElementById('new-teacher-email').value.trim().toLowerCase();
+  const pw = document.getElementById('new-teacher-password').value.trim();
+  if (!name || !email || !pw) { showToast('❗ Bitte Name, E-Mail und Passwort ausfüllen.', 'error'); return; }
+  if (pw.length < 6) { showToast('❗ Passwort mind. 6 Zeichen.', 'error'); return; }
+  if (email === ADMIN_EMAIL) { showToast('❗ Diese E-Mail ist dem Admin vorbehalten.', 'error'); return; }
+  showToast('⏳ Lehrkraft wird angelegt…', 'info');
+  try {
+    const uid = await fb().createAccount(email, pw);
+    const profile = { name, email };
+    if (Object.keys(classMap).length) profile.classes = classMap;
+    await gSet('teachers/' + uid, profile);
+    closeModal('modal-teacher');
+    showToast(`👩‍🏫 ${name} angelegt`, 'success');
+  } catch(e) {
+    showToast(e.code === 'auth/email-already-in-use' ? '❗ E-Mail bereits vergeben.' :
+              e.code === 'auth/invalid-email' ? '❗ Ungültige E-Mail-Adresse.' : '❗ ' + e.message, 'error');
+  }
+}
+
+async function deleteTeacher(id) {
+  const t = state.teachers.find(x => x.id === id);
+  if (!t) return;
+  if (!confirm(`Lehrkraft „${t.name || t.email}“ entfernen? Sie kann sich danach nicht mehr anmelden. (Den Login-Account selbst kannst du zusätzlich in der Firebase-Konsole unter Authentication löschen.)`)) return;
+  try { await gRemove('teachers/' + id); showToast('🗑 Lehrkraft entfernt', 'info'); }
+  catch(e) { showToast('❗ ' + e.message, 'error'); }
+}
+
+// Übernahme der Daten aus der Einzelklassen-Version (liegen dort direkt im Wurzelverzeichnis)
+async function migrateLegacyData() {
+  const name = (prompt('Name der neuen Klasse für die bisherigen Daten (z.B. 7a):') || '').trim();
+  if (!name) return;
+  try {
+    showToast('⏳ Daten werden übernommen…', 'info');
+    const [stS, rwS, hwS, mtS, rlS] = await Promise.all(
+      ['students','rewards','hwStatus','meta','redeemLog'].map(k => fb().get(gref(k))));
+    const students = stS.val() || {};
+    if (!Object.keys(students).length && !rwS.exists()) {
+      showToast('ℹ️ Keine alten Daten gefunden.', 'info'); return;
+    }
+    const classRef = fb().push(gref('classes'));
+    const classId = classRef.key;
+    await fb().set(classRef, { name });
+    const data = {};
+    if (stS.exists()) data.students = students;
+    if (rwS.exists()) data.rewards = rwS.val();
+    if (hwS.exists()) data.hwStatus = hwS.val();
+    if (mtS.exists()) data.meta = mtS.val();
+    if (rlS.exists()) data.redeemLog = rlS.val();
+    await gSet('classData/' + classId, data);
+    for (const [sid, st] of Object.entries(students)) {
+      if (st && st.uid) {
+        await gSet('studentIndex/' + st.uid, { classId, studentId: sid, name: `${st.first || ''} ${st.last || ''}`.trim() });
+      }
+    }
+    showToast(`✅ ${Object.keys(students).length} Schüler in Klasse „${name}“ übernommen`, 'success');
+  } catch(e) {
+    console.error(e);
+    showToast('❗ Übernahme fehlgeschlagen: ' + e.message, 'error');
+  }
+}
+
+// ============================================================
+// UTILS
+// ============================================================
+function openModal(id)  { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if(e.target===el) el.classList.remove('open'); });
+});
+let toastTimeout;
+function showToast(msg, type='info') {
+  const t=document.getElementById('toast');
+  document.getElementById('toast-icon').textContent={success:'✅',error:'❌',info:'ℹ️'}[type]||'ℹ️';
+  document.getElementById('toast-msg').textContent=msg;
+  t.className='show '+type;
+  clearTimeout(toastTimeout);
+  toastTimeout=setTimeout(()=>t.className=type,3200);
+}
+function formatDate(d) { if(!d) return ''; const [y,m,day]=d.split('-'); return `${day}.${m}.${y}`; }
+</script>
+</body>
+</html>
